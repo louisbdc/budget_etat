@@ -2,13 +2,13 @@
 
 Outil perso pour explorer le budget de l'État français et simuler des scénarios « et si » (solde, dette, charge d'intérêts).
 
-> **État d'avancement.** Les parseurs sont écrits d'après deux inspections des fichiers réels (`data/INSPECTION.md`).
+> **État d'avancement.** Les parseurs sont écrits d'après trois inspections des fichiers réels.
 >
-> - Exécution des dépenses : 2010–2014, 2018 et 2024 (2019–2020 en Excel, parseur prêt).
-> - Recettes nettes : 2010–2012 et 2024.
-> - Dette négociable de l'État et PIB : 2009–2025.
+> - **Agrégats officiels mensuels 2013 → 2026** (SMB de la DGFiP) : solde budgétaire, dépenses et recettes nettes, recettes par grand impôt, charge de la dette.
+> - **Détail mission → programme → titre** : 2010–2014, 2018, 2023–2025 (2019–2020 en Excel, à confirmer).
+> - **Dette négociable de l'État et PIB** : 2009–2025.
 >
-> Restent à voir : PLRG 2023 et 2025 (qui étaient exclus à tort, corrigé), le jeu « situations mensuelles budgétaires 2013+ », et 2015–2017 et 2021–2022.
+> Restent sans détail par programme : 2015–2017 et 2021–2022 (aucun jeu au catalogue). Les agrégats SMB couvrent ces années dans « Évolution » si le fichier 2013–2023 est bien lu.
 
 ## Lancer
 
@@ -58,38 +58,50 @@ Schéma canonique (`db.py`) : `depense` (exercice, mois, periode, nature, missio
 | Source | Contenu réel | Exercices | Statut |
 |---|---|---|---|
 | [data.gouv.fr – SME DGFiP](https://www.data.gouv.fr/datasets/dgfip-situation-mensuelle-de-letat) + miroir `situation-mensuelle-de-l-etat` | **index de 212 PDF**, aucune donnée | 2010–2026 | non utilisé |
-| `situations-mensuelles-budgetaires-series-longues` | « SME de 2013 à nos jours » (titre du catalogue) | 2013+ | **à inspecter** |
+| `situations-mensuelles-budgetaires-series-longues` | **SMB DGFiP** : tableau large, 26 « lignes d'information » (solde budgétaire, dépenses nettes par titre, PSR, recettes nettes par grand impôt, soldes CS/BA, R&D) × fins de mois (`jj_mm_aaaa`, cumul en €). Notice PDF jointe. | export : 2024-01 → 2026-07 ; pièce jointe 2013–2023 | export ingéré ; pièce jointe 2013–2023 : parseur prêt, à confirmer |
 | `execution-AAAA-du-budget-general-en-cp` | CP par programme × action × titre (t1…t7), € ; 2010 sans mission | 2010, 2011 | ingéré |
 | `execution-2012-…-nomenclature-mission-programm` | idem, sans total, comptes spéciaux inclus | 2012 | ingéré (budget général) |
 | `execution-2013-…` / `plr-2014-…` (pièces jointes cp1252) | tableau croisé : 4 lignes de titre puis `Mission;Programme;…;T1…T7;Total général`, nombres `24 928 201` | 2013, 2014 | ingéré |
 | `projet-de-loi-de-reglement-2019-plr-20190` (titre « PLR 2018 ») | destination × nature : programme × action × catégorie × titre, `exec_cp_2018_rap_2018` | 2018 (`annee_rap`) | ingéré ; la synthèse par programme (`…-plr-2019`) sert de contrôle, le tableau par titre (`…-plr-20191`) est un doublon ignoré |
 | `…-plr-20192`, `…-plr-2020` (pièces jointes `credits_destination_nature_xls`) | classeurs Excel | 2019, 2020 | parseur prêt (même format présumé), **à confirmer** |
 | `plrg-2024` | `annexe1_etat_titre_cat` (dépenses), `annexe1_etat_recettes` (recettes par section), `annexe1_etat_cp` (contrôle) | 2024 | ingéré ; 130 contrôles exacts |
-| PLRG 2023, PLRG 2025 (`projet-de-loi-relatif-aux-resultats-…`) | présumés au format PLRG 2024 | 2023, 2025 | **à télécharger** (exclus à tort, corrigé) |
+| PLRG 2023, PLRG 2025 (`projet-de-loi-relatif-aux-resultats-…`) | même format que 2024 pour les dépenses ; recettes 2025 en recouvrements bruts par ligne (autre format) | 2023, 2025 | dépenses ingérées ; recettes prises dans la SMB |
 | `plf-2013/2014-recettes-fiscales-nettes` (pièces jointes) | colonne « Exécution N-2 » : nettes par impôt (IR, IS, TICPE, TVA, autres), non fiscales, prélèvements, M€ | 2011, 2012 | ingéré |
-| `plf-2012-recettes-fiscales-nettes` | autre mise en page, en milliers d'€ | 2010 | **format non reconnu**, signalé |
+| `plf-2012-recettes-fiscales-nettes` | milliers d'€, impôts nets mais **sans recettes non fiscales, ni prélèvements, ni R&D d'impôts locaux** | 2010 | **non ingéré** : un total net 2010 serait faux |
 | `plf-2024/plf25-recettes-…`, `plf25-depenses-…-selon-destination` | prévisions PLF / LFI | 2024, 2025 | ingéré (nature `plf` / `lfi`) |
 | INSEE série **001739081** | encours de la dette négociable totale de l'État (AFT), mensuel, M€ (`UNIT_MULT=6`) | 2009-01 → 2026-08 | ingéré : décembre = fin d'année |
 | Eurostat `gov_10dd_edpt1` | `MIO_EUR` × `S13` × `GD` / `B9` (codes confirmés) | 1995–2025 | ingéré (périmètre APU) |
 | Eurostat `nama_10_gdp` | PIB `B1GQ` `CP_MEUR` | 1975–2025 | ingéré |
 
 **Trous connus.**
-- **2015–2017 et 2021–2022** : aucun jeu d'exécution au catalogue data.economie. Le jeu des séries longues de la SME pourrait les couvrir.
-- **Solde d'exécution officiel** : à chercher dans les séries longues de la SME. En attendant, l'outil affiche le solde du budget général calculé.
-- **Sens exact de « Total des recettes** » (PLRG 2024)** : la notice est un PDF ; `inspect` en extrait maintenant les lignes de note.
+- **Détail par programme 2015–2017 et 2021–2022** : aucun jeu au catalogue data.economie. Ces années n'ont que les agrégats SMB.
+- **Recettes 2010** : tableau source incomplet (voir ci-dessus).
+- **PLR 2019–2020** : classeurs Excel pas encore lus (inspection précédente sans support Excel).
+
+**Vérifications faites sur les données réelles** (`VALIDATION.md`) :
+- 501 contrôles programme par programme exacts au centime ;
+- 2024 : détail PLRG = SMB pour les dépenses nettes (443 413 M€) et pour les recettes fiscales (325 679 M€) ;
+- solde SMB 2024 = recettes nettes + fonds de concours − dépenses nettes − prélèvements + soldes des comptes spéciaux et budgets annexes, au centime.
+
+`data/raw/manifest.json` trace chaque fichier (URL, date UTC, sha256). Le statut de chaque fichier est affiché : ingéré, ignoré, à inspecter (format inconnu, avec ses en-têtes) ou en erreur. **Aucun chiffre n'est codé en dur, et un format inconnu n'est jamais deviné.**
+
+### Sources multiples et priorité
+
+Quand plusieurs fichiers couvrent le même exercice, `ingest` ne garde qu'une source par exercice (et par mois et indicateur pour les agrégats). Ordre de priorité : SMB / INSEE / Eurostat > PLRG > PLR > exécution data.economie > PLF. Les sources écartées et les écarts éventuels sont listés dans `VALIDATION.md`.
 
 ### Conventions de normalisation
 
 - Montants convertis en **M€** ; nombres français (`1 234,56`), encodages UTF-8, cp1252 et latin-1 gérés.
 - Budget général seulement, selon la numérotation des programmes : < 600 budget général, 6xx budgets annexes, 7xx CAS, 8xx CCF, 9xx comptes de commerce.
-- **Vue nette** : les programmes 200/201 (remboursements et dégrèvements) sont stockés mais exclus des dépenses, car les recettes fiscales sont nettes.
-- Recettes 2024 : totaux par section de la colonne « Total des recettes** ». Le sens exact de `**` reste à confirmer dans la notice (zip `notices_par_fichiers_csv_plrg_2024`, que le nouvel `inspect` décompresse).
+- **Vue nette**, alignée sur la SMB : le programme 200 (remboursements et dégrèvements d'impôts d'État) est toujours exclu. Le programme 201 (impôts locaux) est exclu jusqu'en 2022 et **inclus depuis 2023** (loi organique du 28/12/2021, rappelée dans la notice SMB).
+- **Évolution** : les agrégats officiels de la SMB (dépenses nettes, charge de la dette, solde budgétaire) priment sur l'agrégation du détail. Le solde officiel inclut les comptes spéciaux et budgets annexes ; sinon le solde est calculé, et c'est indiqué sous le graphique.
+- Recettes : SMB (nettes par grand impôt) à partir de 2013, PLF N+2 pour 2011–2012. Les sections PLRG (« Total des recettes** », nettes : le total fiscal 2024 est égal à celui de la SMB) servent de contrôle.
 - Prélèvements sur recettes (UE, collectivités) : stockés en positif, retranchés des recettes nettes.
 - Charge de la dette : programme 117 (titre 4).
 
 ### Ce qui reste à faire
 
-1. Relancer `budget fetch`, `budget inspect` puis `budget ingest`, et partager `INSPECTION.md` et `VALIDATION.md`. On y verra : PLRG 2023 et 2025, les séries longues de la SME, les classeurs 2019–2020 et la note `**`.
+1. Relancer `budget inspect` puis `budget ingest` (inutile de refaire `fetch`), et partager `INSPECTION.md` et `VALIDATION.md`. On y verra : la SMB 2013–2023 (lecture Python de secours) et les classeurs PLR 2019–2020.
 2. Écrire les parseurs restants (séries longues, PLF 2012) d'après ce rapport.
 3. Vérifier `rigidites.py` sur les libellés réels.
 
