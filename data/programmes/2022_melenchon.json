@@ -1,0 +1,91 @@
+{
+  "nom": "Programme 2022 (chiffrage Institut Montaigne)",
+  "porteur": "Jean-Luc Mélenchon",
+  "election": "présidentielle 2022",
+  "statut": "présidentielle 2022, rejoué pour test : mesures appliquées à partir de 2027 sur la base 2025",
+  "description": "Trois mesures représentables sur le budget de l'État. Chiffres relevés dans les résultats d'un moteur de recherche (résumé), page source non ouverte : à vérifier sur la page avant tout usage.",
+  "source_principale": {
+    "titre": "Institut Montaigne – chiffrage présidentielle 2022",
+    "url": "https://www.institutmontaigne.org/presidentielle-2022/jean-luc-melenchon/",
+    "consulte_le": "2026-10-05"
+  },
+  "mesures": [
+    {
+      "libelle": "Mettre fin au quotient conjugal",
+      "cote": "recette",
+      "cible": "R:IR",
+      "mode": "meur",
+      "valeur": 7200,
+      "debut": 2027,
+      "montee_en_charge": 1,
+      "chiffrage": "tiers",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/jean-luc-melenchon/mettre-fin-au-quotient-conjugal/",
+        "citation": "de 7,2 à 10 milliards d'euros de recettes supplémentaires par an",
+        "auteur": "Institut Montaigne",
+        "consulte_le": "2026-10-05",
+        "verification": "page non ouverte (extrait de moteur de recherche)"
+      },
+      "note": "Borne basse de la fourchette retenue (7,2 à 10 Md€)."
+    },
+    {
+      "libelle": "Augmenter les droits de succession sur les plus hauts patrimoines (héritage maximal de 12 M€)",
+      "cote": "recette",
+      "cible": "R:AUTRES",
+      "mode": "meur",
+      "valeur": 9000,
+      "debut": 2027,
+      "montee_en_charge": 1,
+      "chiffrage": "tiers",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/jean-luc-melenchon/augmenter-les-droits-de-succession-sur-les-plus-hauts-patrimoines-et-creer-un-heritage-maximal-de-12-me/",
+        "citation": "environ 9 milliards d'euros de recettes supplémentaires",
+        "auteur": "Institut Montaigne",
+        "consulte_le": "2026-10-05",
+        "verification": "page non ouverte (extrait de moteur de recherche)"
+      },
+      "note": "Droits de succession : poste « autres recettes fiscales » de la SMB."
+    },
+    {
+      "libelle": "Gratuité de l'enseignement supérieur (licence au doctorat)",
+      "cote": "depense",
+      "cible": "M:Recherche et enseignement supérieur",
+      "mode": "meur",
+      "valeur": 400,
+      "debut": 2027,
+      "montee_en_charge": 1,
+      "chiffrage": "tiers",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/jean-luc-melenchon/instaurer-la-gratuite-de-lesr-de-la-licence-au-doctorat/",
+        "citation": "400 millions d'euros par an",
+        "auteur": "Institut Montaigne",
+        "consulte_le": "2026-10-05",
+        "verification": "page non ouverte (extrait de moteur de recherche)"
+      },
+      "note": ""
+    }
+  ],
+  "non_representees": [
+    {
+      "libelle": "Plan de 200 Md€ d'investissements (chiffré à 29 Md€ par l'Institut Montaigne)",
+      "raison": "période du chiffrage ambiguë dans l'extrait (annuel ou cumulé ?) : non simulé plutôt que deviné",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/jean-luc-melenchon/lancer-un-plan-de-200-mde-dinvestissements-ecologiquement-et-socialement-utiles/"
+      }
+    },
+    {
+      "libelle": "Recruter 100 000 soignants",
+      "raison": "hors budget de l'État (Sécurité sociale / collectivités / cotisations) (hôpitaux, ONDAM)",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/jean-luc-melenchon/recruter-100-000-soignants/"
+      }
+    },
+    {
+      "libelle": "SMIC à 1 400 € net (2,7 Md€/an)",
+      "raison": "répartition du coût entre État, Sécurité sociale et collectivités non précisée",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/jean-luc-melenchon/augmenter-le-smic-a-1-400-e-net/"
+      }
+    }
+  ]
+}

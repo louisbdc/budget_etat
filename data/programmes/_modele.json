@@ -18,5 +18,8 @@
       "source": {"url": "", "citation": "phrase exacte qui donne le chiffre", "auteur": "", "consulte_le": "AAAA-MM-JJ"},
       "note": "hypothèses de traduction (ex. « 10 Md€ sur le quinquennat » -> 2 Md€/an)"
     }
+  ],
+  "non_representees": [
+    {"libelle": "Mesure du programme que le modèle ne peut pas simuler", "raison": "hors budget de l'État / chiffre absent / ponctuelle…", "source": {"url": ""}}
   ]
 }

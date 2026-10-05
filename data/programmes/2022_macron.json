@@ -1,0 +1,84 @@
+{
+  "nom": "Programme 2022 (chiffrage Institut Montaigne)",
+  "porteur": "Emmanuel Macron",
+  "election": "présidentielle 2022",
+  "statut": "présidentielle 2022, rejoué pour test : mesures appliquées à partir de 2027 sur la base 2025",
+  "description": "Trois mesures représentables sur le budget de l'État. Chiffres relevés dans les résultats d'un moteur de recherche (résumé), page source non ouverte : à vérifier sur la page avant tout usage.",
+  "source_principale": {
+    "titre": "Institut Montaigne – chiffrage présidentielle 2022",
+    "url": "https://www.institutmontaigne.org/presidentielle-2022/emmanuel-macron/synthese/",
+    "consulte_le": "2026-10-05"
+  },
+  "mesures": [
+    {
+      "libelle": "Supprimer la redevance audiovisuelle (compensation par l'État)",
+      "cote": "depense",
+      "cible": "M:Médias, livre et industries culturelles",
+      "mode": "meur",
+      "valeur": 3200,
+      "debut": 2027,
+      "montee_en_charge": 1,
+      "chiffrage": "tiers",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/emmanuel-macron/supprimer-la-redevance-audiovisuelle/",
+        "citation": "La suppression de la contribution à l'audiovisuel public impliquerait une hausse d'environ 3,2 milliards d'euros des dépenses de l'État",
+        "auteur": "Institut Montaigne",
+        "consulte_le": "2026-10-05",
+        "verification": "page non ouverte (extrait de moteur de recherche)"
+      },
+      "note": "Compensation budgétaire de la ressource de l'audiovisuel public, imputée à la mission Médias."
+    },
+    {
+      "libelle": "Revaloriser les salaires des enseignants (~10 %)",
+      "cote": "depense",
+      "cible": "M:Enseignement scolaire",
+      "mode": "meur",
+      "valeur": 5000,
+      "debut": 2027,
+      "montee_en_charge": 1,
+      "chiffrage": "tiers",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/legislatives-2022/ensemble/revaloriser-les-salaires-des-enseignants-de-10/",
+        "citation": "une revalorisation d'environ 10 % des salaires des enseignants, pour un coût annuel de 5 milliards d'euros",
+        "auteur": "Institut Montaigne",
+        "consulte_le": "2026-10-05",
+        "verification": "page non ouverte (extrait de moteur de recherche)"
+      },
+      "note": "Coût annuel en régime de croisière ; appliqué en une fois (montée en charge 1 an)."
+    },
+    {
+      "libelle": "Hausse du budget des armées (+3 Md€ par an)",
+      "cote": "depense",
+      "cible": "M:Défense",
+      "mode": "meur",
+      "valeur": 15000,
+      "debut": 2027,
+      "montee_en_charge": 5,
+      "chiffrage": "tiers",
+      "source": {
+        "url": "https://institutmontaigne.org/blog/presidentielle-2022-que-proposent-les-candidats-pour-la-defense",
+        "citation": "les plus fortes hausses, +3 milliards d'euros par an, à partir de 2023",
+        "auteur": "Institut Montaigne",
+        "consulte_le": "2026-10-05",
+        "verification": "page non ouverte (extrait de moteur de recherche)"
+      },
+      "note": "+3 Md€ supplémentaires chaque année : modélisé comme +15 Md€ atteints en 5 ans (montée en charge linéaire)."
+    }
+  ],
+  "non_representees": [
+    {
+      "libelle": "Réforme des retraites (économies de 7,7 Md€/an en 2027)",
+      "raison": "hors budget de l'État (Sécurité sociale / collectivités / cotisations)",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/emmanuel-macron/synthese/"
+      }
+    },
+    {
+      "libelle": "Supprimer la CVAE",
+      "raison": "impôt local compensé aux collectivités : effet sur le budget de l'État non chiffré dans la source",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/emmanuel-macron/supprimer-la-cvae/"
+      }
+    }
+  ]
+}

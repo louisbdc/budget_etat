@@ -85,3 +85,20 @@ def test_api_programmes(tmp_path):
     assert ko["target"] is None and "introuvable" in ko["erreur"]
     assert c.get("/api/programmes/casse").status_code == 422
     assert c.get("/api/programmes/absent").status_code == 404
+
+
+def test_committed_programmes_are_valid_and_resolve():
+    """Les programmes de data/programmes/ sont valides et leurs cibles existent
+    dans une année de base portant les libellés réels (PLRG 2024-2025, SMB)."""
+    missions = ["Défense", "Enseignement scolaire", "Justice", "Médias, livre et industries culturelles",
+                "Recherche et enseignement supérieur", "Engagements financiers de l'État"]
+    base = {
+        "spending": [{"key": f"P:{i}", "group": f"M:{m}", "group_label": m} for i, m in enumerate(missions, 100)],
+        "revenue": [{"key": f"R:{c}", "group": "C:fiscale", "group_label": "fiscale"}
+                    for c in ("IR", "IS", "TICPE", "TVA", "AUTRES")],
+    }
+    progs = prog.lister()
+    assert progs and all(p["erreur"] is None for p in progs)
+    for p in progs:
+        for m in prog.resoudre(prog.charger(p["id"]), base):
+            assert m["erreur"] is None, (p["id"], m["libelle"], m["erreur"])

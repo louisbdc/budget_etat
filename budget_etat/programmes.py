@@ -59,9 +59,12 @@ def valider(data: dict, ident: str) -> dict:
         src = m.get("source") or {}
         if m.get("chiffrage") in ("porteur", "tiers") and not (src.get("url") and src.get("citation")):
             erreurs.append(f"{p} : chiffrage « {m.get('chiffrage')} » sans source (url + citation)")
+    for i, n in enumerate(data.get("non_representees") or [], 1):
+        if not (n.get("libelle") and n.get("raison")):
+            erreurs.append(f"non_representees {i} : « libelle » et « raison » obligatoires")
     if erreurs:
         raise ProgrammeInvalide(f"{ident} : " + " ; ".join(erreurs))
-    return {**data, "id": ident, "mesures": mesures}
+    return {**data, "id": ident, "mesures": mesures, "non_representees": data.get("non_representees") or []}
 
 
 def lister(directory: Path = PROGRAMMES_DIR) -> list[dict]:
@@ -73,6 +76,7 @@ def lister(directory: Path = PROGRAMMES_DIR) -> list[dict]:
         try:
             p = charger(f.stem, directory)
             out.append({"id": p["id"], "nom": p["nom"], "porteur": p["porteur"], "nb_mesures": len(p["mesures"]),
+                        "nb_non_representees": len(p["non_representees"]),
                         "sans_source": sum(1 for m in p["mesures"] if m["chiffrage"] == "utilisateur"),
                         "statut": p.get("statut"), "erreur": None})
         except (ProgrammeInvalide, json.JSONDecodeError) as e:

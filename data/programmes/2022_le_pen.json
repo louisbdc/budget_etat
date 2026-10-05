@@ -1,0 +1,70 @@
+{
+  "nom": "Programme 2022 (chiffrage Institut Montaigne)",
+  "porteur": "Marine Le Pen",
+  "election": "présidentielle 2022",
+  "statut": "présidentielle 2022, rejoué pour test : mesures appliquées à partir de 2027 sur la base 2025",
+  "description": "Deux mesures représentables sur les recettes de l'État. Chiffres relevés dans les résultats d'un moteur de recherche (résumé), page source non ouverte : à vérifier sur la page avant tout usage.",
+  "source_principale": {
+    "titre": "Institut Montaigne – chiffrage présidentielle 2022",
+    "url": "https://www.institutmontaigne.org/presidentielle-2022/marine-le-pen/synthese/",
+    "consulte_le": "2026-10-05"
+  },
+  "mesures": [
+    {
+      "libelle": "Baisser la TVA de 20 % à 5,5 % sur carburants, électricité, gaz et fioul",
+      "cote": "recette",
+      "cible": "R:TVA",
+      "mode": "meur",
+      "valeur": -10300,
+      "debut": 2027,
+      "montee_en_charge": 1,
+      "chiffrage": "tiers",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/marine-le-pen/baisser-la-tva-de-20-a-55-pour-les-carburants-lelectricite-le-gaz-et-le-fioul-domestique/",
+        "citation": "une perte de 10,3 milliards d'euros par an pour les finances publiques",
+        "auteur": "Institut Montaigne",
+        "consulte_le": "2026-10-05",
+        "verification": "page non ouverte (extrait de moteur de recherche)"
+      },
+      "note": "Estimation centrale ; fourchette Institut Montaigne : 8,2 à 12,4 Md€/an."
+    },
+    {
+      "libelle": "Exonérer d'impôt sur le revenu les moins de 30 ans",
+      "cote": "recette",
+      "cible": "R:IR",
+      "mode": "meur",
+      "valeur": -3700,
+      "debut": 2027,
+      "montee_en_charge": 1,
+      "chiffrage": "tiers",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/marine-le-pen/exonerer-tous-les-jeunes-de-moins-de-30-ans-dimpot-sur-le-revenu/",
+        "citation": "l'Institut Montaigne évalue le coût de cette mesure à 3,7 milliards d'euros par an pour les finances publiques",
+        "auteur": "Institut Montaigne",
+        "consulte_le": "2026-10-05",
+        "verification": "page non ouverte (extrait de moteur de recherche)"
+      },
+      "note": "Le candidat chiffrait 2 Md€/an ; mise à jour Institut Montaigne de 2024 : 5,3 Md€. Constitutionnalité incertaine selon la source."
+    }
+  ],
+  "non_representees": [
+    {
+      "libelle": "Réforme des retraites",
+      "raison": "hors budget de l'État (Sécurité sociale / collectivités / cotisations)"
+    },
+    {
+      "libelle": "Construire 100 000 logements sociaux par an",
+      "raison": "aucun chiffre relevé dans les résultats de recherche",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/marine-le-pen/construire-100-000-logements-sociaux-par-an-dont-20-000-en-faveur-des-etudiants-et-jeunes-travailleurs/"
+      }
+    },
+    {
+      "libelle": "Revaloriser les salaires des enseignants",
+      "raison": "aucun chiffre relevé dans les résultats de recherche",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/marine-le-pen/revaloriser-les-salaires-des-enseignants-et-refonder-leur-formation/"
+      }
+    }
+  ]
+}

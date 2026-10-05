@@ -1,0 +1,73 @@
+{
+  "nom": "Programme 2022 (chiffrage Institut Montaigne)",
+  "porteur": "Yannick Jadot",
+  "election": "présidentielle 2022",
+  "statut": "présidentielle 2022, rejoué pour test : mesures appliquées à partir de 2027 sur la base 2025",
+  "description": "Deux mesures représentables sur le budget de l'État. Chiffres relevés dans les résultats d'un moteur de recherche (résumé), page source non ouverte : à vérifier sur la page avant tout usage.",
+  "source_principale": {
+    "titre": "Institut Montaigne – chiffrage présidentielle 2022",
+    "url": "https://www.institutmontaigne.org/presidentielle-2022/yannick-jadot/",
+    "consulte_le": "2026-10-05"
+  },
+  "mesures": [
+    {
+      "libelle": "Rétablir l'ISF et le transformer en ISF climatique",
+      "cote": "recette",
+      "cible": "R:AUTRES",
+      "mode": "meur",
+      "valeur": 17000,
+      "debut": 2027,
+      "montee_en_charge": 1,
+      "chiffrage": "tiers",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/yannick-jadot/retablir-lisf-et-le-transformer-en-isf-climatique/",
+        "citation": "la mesure rapporterait 17 milliards d'euros par an, avec une estimation basse de 15 milliards et haute de 22 milliards",
+        "auteur": "Institut Montaigne",
+        "consulte_le": "2026-10-05",
+        "verification": "page non ouverte (extrait de moteur de recherche)"
+      },
+      "note": "Estimation centrale ; poste « autres recettes fiscales »."
+    },
+    {
+      "libelle": "Augmenter le budget de la justice d'1 Md€",
+      "cote": "depense",
+      "cible": "M:Justice",
+      "mode": "meur",
+      "valeur": 1000,
+      "debut": 2027,
+      "montee_en_charge": 1,
+      "chiffrage": "tiers",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/yannick-jadot/augmenter-le-budget-de-la-justice-d1-mde-et-embaucher-3-000-magistrats-et-8-000-agents-de-tribunaux/",
+        "citation": "Augmenter le budget de la justice d'1 Md€ et embaucher 3 000 magistrats et 8 000 agents de tribunaux",
+        "auteur": "Institut Montaigne",
+        "consulte_le": "2026-10-05",
+        "verification": "page non ouverte (extrait de moteur de recherche)"
+      },
+      "note": "Montant tiré de l'intitulé de la mesure (page non ouverte)."
+    }
+  ],
+  "non_representees": [
+    {
+      "libelle": "Revenir sur la baisse des impôts de production (+8,5 Md€/an)",
+      "raison": "impôts locaux compensés par l'État (TVA, prélèvements sur recettes) : effet sur l'État non séparé dans la source",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/yannick-jadot/revenir-sur-la-baisse-des-impots-de-production-de-ces-dernieres-annees/"
+      }
+    },
+    {
+      "libelle": "Réformer l'IR et supprimer le quotient conjugal",
+      "raison": "aucun chiffre relevé dans les résultats de recherche",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/yannick-jadot/renforcer-la-progressivite-de-limpot-sur-le-revenu-et-supprimer-le-quotient-conjugal/"
+      }
+    },
+    {
+      "libelle": "700 000 logements sociaux construits, 800 000 rénovés",
+      "raison": "aucun chiffre relevé dans les résultats de recherche",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/yannick-jadot/construire-700-000-logements-sociaux-et-en-renover-800-000-a-condition-quils-restent-20-ans-dans-le-parc-social/"
+      }
+    }
+  ]
+}

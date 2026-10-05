@@ -151,6 +151,15 @@ Règles :
 - **neutralité** : tous les programmes et scénarios comparés sont projetés avec les mêmes hypothèses macro (celles de l'interface). Les écarts ne viennent que des mesures ;
 - limites : un programme est réduit à des variations de lignes du budget général de l'État. Les mesures portant sur la Sécurité sociale, les collectivités, la réglementation ou les dépenses fiscales sans montant chiffré ne sont pas représentables. Les effets de comportement (sauf le multiplicateur optionnel) ne sont pas modélisés.
 
+### Programmes fournis : présidentielle 2022 (test)
+
+`data/programmes/2022_*.json` contient les six principaux candidats de 2022 (Macron, Le Pen, Mélenchon, Pécresse, Zemmour, Jadot), traités de la même façon :
+- **une seule source pour tous** : les chiffrages mesure par mesure de l'Institut Montaigne, un tiers, plutôt que les chiffrages des équipes de campagne ;
+- **chiffres relevés dans des résultats de moteur de recherche, pages non ouvertes** (l'environnement de développement n'y avait pas accès) : chaque mesure porte l'URL de sa page et l'avertissement « à vérifier » ;
+- **rejoués pour test** à partir de 2027 sur la base 2025 : ils servent à tester l'outil, pas à évaluer ce qu'auraient donné ces programmes en 2022 ;
+- la plupart des grosses mesures (retraites, CSG, cotisations, impôts de production locaux, hôpitaux) sont **hors budget de l'État** : elles sont listées dans `non_representees` avec la raison, et affichées dans l'interface, mais pas simulées. Le programme Zemmour n'a ainsi aucune mesure simulable ;
+- quand le chiffre est une fourchette : estimation centrale de la source si elle existe, sinon borne basse, indiquée dans la note de la mesure.
+
 Graphiques associés : déficit / PIB ; décomposition de l'écart de déficit (dépenses, intérêts, recettes) ; dépenses par mission et recettes par poste, en écart à la référence, année par année (ce qui monte, ce qui baisse, et quand) ; tableau comparatif à l'horizon.
 
 ## Simulateur : formules (`budget_etat/projection.py`)

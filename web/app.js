@@ -443,7 +443,12 @@ $("#prog-list").addEventListener("change", async (e) => {
   $("#prog-info").replaceChildren(
     `${p.nom} — ${p.porteur}${p.statut ? ` (${p.statut})` : ""}. ${p.description || ""} `,
     src ? el("a", { href: src, target: "_blank", rel: "noopener noreferrer" }, "source principale") : "",
-    ko ? el("span", { class: "error" }, ` ${ko} mesure(s) non appliquée(s), voir la colonne Origine.`) : "");
+    ko ? el("span", { class: "error" }, ` ${ko} mesure(s) non appliquée(s), voir la colonne Origine.`) : "",
+    p.non_representees.length ? el("details", {},
+      el("summary", {}, `${p.non_representees.length} mesure(s) du programme non représentables dans ce modèle (non simulées)`),
+      el("ul", {}, ...p.non_representees.map((n) => el("li", {}, `${n.libelle} — ${n.raison}`,
+        n.source?.url && /^https?:\/\//.test(n.source.url)
+          ? el("span", {}, " (", el("a", { href: n.source.url, target: "_blank", rel: "noopener noreferrer" }, "source"), ")") : "")))) : "");
   renderMeasures();
 });
 $("#sc-save").addEventListener("click", async () => {

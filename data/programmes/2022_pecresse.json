@@ -1,0 +1,98 @@
+{
+  "nom": "Programme 2022 (chiffrage Institut Montaigne)",
+  "porteur": "Valérie Pécresse",
+  "election": "présidentielle 2022",
+  "statut": "présidentielle 2022, rejoué pour test : mesures appliquées à partir de 2027 sur la base 2025",
+  "description": "Trois mesures représentables sur les dépenses de l'État. Chiffres relevés dans les résultats d'un moteur de recherche (résumé), page source non ouverte : à vérifier sur la page avant tout usage.",
+  "source_principale": {
+    "titre": "Institut Montaigne – chiffrage présidentielle 2022",
+    "url": "https://www.institutmontaigne.org/presidentielle-2022/valerie-pecresse/synthese/",
+    "consulte_le": "2026-10-05"
+  },
+  "mesures": [
+    {
+      "libelle": "Supprimer 200 000 postes de fonctionnaires administratifs",
+      "cote": "depense",
+      "cible": "*",
+      "mode": "meur",
+      "valeur": -5900,
+      "debut": 2027,
+      "montee_en_charge": 5,
+      "chiffrage": "tiers",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/valerie-pecresse/supprimer-200-000-postes-de-fonctionnaires-administratifs/",
+        "citation": "des économies totales de 17,8 milliards d'euros sur l'ensemble du quinquennat, soit 5,9 milliards d'euros par an",
+        "auteur": "Institut Montaigne",
+        "consulte_le": "2026-10-05",
+        "verification": "page non ouverte (extrait de moteur de recherche)"
+      },
+      "note": "Cible « toutes les dépenses » au prorata (le modèle ne distingue pas le titre 2 par ministère) ; 5 ans de montée en charge."
+    },
+    {
+      "libelle": "Plan pour la justice : +50 % du budget des tribunaux en 5 ans",
+      "cote": "depense",
+      "cible": "M:Justice",
+      "mode": "meur",
+      "valeur": 3100,
+      "debut": 2027,
+      "montee_en_charge": 5,
+      "chiffrage": "tiers",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/valerie-pecresse/mettre-en-place-un-plan-orsec-pour-la-justice-9-milliards-deuros-pour-les-tribunaux-et-les-prisons/",
+        "citation": "un effort de 0,62 milliard d'euros par an",
+        "auteur": "Institut Montaigne",
+        "consulte_le": "2026-10-05",
+        "verification": "page non ouverte (extrait de moteur de recherche)"
+      },
+      "note": "0,62 Md€ de plus chaque année pendant 5 ans : +3,1 Md€ en fin de quinquennat (interprétation de l'extrait)."
+    },
+    {
+      "libelle": "20 000 places de prison : fonctionnement en année pleine",
+      "cote": "depense",
+      "cible": "M:Justice",
+      "mode": "meur",
+      "valeur": 1100,
+      "debut": 2027,
+      "montee_en_charge": 5,
+      "chiffrage": "tiers",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/valerie-pecresse/mettre-en-place-un-plan-orsec-pour-la-justice-9-milliards-deuros-pour-les-tribunaux-et-les-prisons/",
+        "citation": "des dépenses de fonctionnement d'environ 1,1 milliard d'euros en année pleine en 2027",
+        "auteur": "Institut Montaigne",
+        "consulte_le": "2026-10-05",
+        "verification": "page non ouverte (extrait de moteur de recherche)"
+      },
+      "note": "Seul le fonctionnement durable est simulé (voir l'investissement dans les mesures non représentées)."
+    }
+  ],
+  "non_representees": [
+    {
+      "libelle": "Investissement prisons : 1 Md€ par an pendant 5 ans",
+      "raison": "dépense ponctuelle : le moteur ne simule que des mesures durables",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/valerie-pecresse/mettre-en-place-un-plan-orsec-pour-la-justice-9-milliards-deuros-pour-les-tribunaux-et-les-prisons/"
+      }
+    },
+    {
+      "libelle": "Retraite à 65 ans (+4,6 Md€ en 2027)",
+      "raison": "hors budget de l'État (Sécurité sociale / collectivités / cotisations)",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/valerie-pecresse/repousser-lage-de-la-retraite-a-65-ans/"
+      }
+    },
+    {
+      "libelle": "Former et recruter 25 000 soignants",
+      "raison": "hors budget de l'État (Sécurité sociale / collectivités / cotisations)",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/valerie-pecresse/former-et-recruter-25-000-soignants-de-plus-sur-le-quinquennat/"
+      }
+    },
+    {
+      "libelle": "Baisser les cotisations salariales vieillesse",
+      "raison": "hors budget de l'État (Sécurité sociale / collectivités / cotisations)",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/valerie-pecresse/baisser-les-cotisations-salariales-vieillesse-de-24-points-pour-tous-les-salaries-du-secteur-prive/"
+      }
+    }
+  ]
+}

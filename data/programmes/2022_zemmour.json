@@ -1,0 +1,57 @@
+{
+  "nom": "Programme 2022 (chiffrage Institut Montaigne)",
+  "porteur": "Éric Zemmour",
+  "election": "présidentielle 2022",
+  "statut": "présidentielle 2022, rejoué pour test : mesures appliquées à partir de 2027 sur la base 2025",
+  "description": "Aucune des mesures chiffrées relevées ne porte sur le budget de l'État : le programme ne peut pas être simulé avec ce modèle. Chiffres relevés dans les résultats d'un moteur de recherche (résumé), page source non ouverte : à vérifier sur la page avant tout usage.",
+  "source_principale": {
+    "titre": "Institut Montaigne – chiffrage présidentielle 2022",
+    "url": "https://www.institutmontaigne.org/presidentielle-2022/eric-zemmour/synthese/",
+    "consulte_le": "2026-10-05"
+  },
+  "mesures": [],
+  "non_representees": [
+    {
+      "libelle": "Prime « zéro charge » (28 Md€/an)",
+      "raison": "hors budget de l'État (Sécurité sociale / collectivités / cotisations) (cotisations sociales)",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/eric-zemmour/synthese/"
+      }
+    },
+    {
+      "libelle": "Baisser les impôts de production de 30 Md€ (25,2 Md€/an)",
+      "raison": "impôts locaux et C3S : hors budget de l'État",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/eric-zemmour/baisser-les-impots-de-production-de-30-milliards-deuros-supplementaires/"
+      }
+    },
+    {
+      "libelle": "CSG sur les revenus d'activité de 9,2 % à 2,5 % (18,5 Md€/an)",
+      "raison": "hors budget de l'État (Sécurité sociale / collectivités / cotisations)",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/eric-zemmour/baisser-le-taux-de-la-csg-sur-les-revenus-dactivite-de-92-a-25/"
+      }
+    },
+    {
+      "libelle": "Réforme des retraites (+10,7 Md€/an)",
+      "raison": "hors budget de l'État (Sécurité sociale / collectivités / cotisations)",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/eric-zemmour/synthese/"
+      }
+    },
+    {
+      "libelle": "Maîtrise des dépenses sociales liées à l'immigration (+9,5 Md€/an)",
+      "raison": "répartition entre État (ex. AME) et Sécurité sociale non précisée dans l'extrait",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/eric-zemmour/synthese/"
+      }
+    },
+    {
+      "libelle": "Exonérer de droits de donation et succession les transmissions d'entreprises familiales",
+      "raison": "aucun chiffre relevé dans les résultats de recherche",
+      "source": {
+        "url": "https://www.institutmontaigne.org/presidentielle-2022/eric-zemmour/exonerer-de-droits-de-donation-et-de-succession-les-transmissions-dentreprises-familiales-entre-generations/"
+      }
+    }
+  ]
+}
