@@ -90,10 +90,14 @@ PARSERS: list[Parser] = [
     Parser("execution", "economie/execution-*/export.csv", sources.parse_exec_titres),
     Parser("execution", "economie/execution-*/attachments/*", sources.parse_exec_titres),
     Parser("plr", "economie/plr*/attachments/*", sources.parse_plr_attachment),
+    Parser("plr", "economie/projet-de-loi-*/attachments/*", sources.parse_plr_attachment),
+    Parser("plr_export", "economie/projet-de-loi-de-reglement*/export.csv", sources.parse_plr_export),
     Parser("plf_recettes", "economie/*recettes-du-budget-general/export.csv", sources.parse_plf_recettes),
     Parser("plf_depenses", "economie/*depenses*destination/export.csv", sources.parse_plf_depenses),
-    # Tableaux mis en page (en-têtes sur 2 lignes) : à écrire après l'inspection complète.
-    Parser("plf_recettes_nettes", "economie/plf-*-recettes-fiscales-nettes/attachments/*", _pending),
+    Parser("plf_recettes_nettes", "economie/plf-*-recettes-fiscales-nettes/attachments/*",
+           sources.parse_recettes_nettes),
+    # Situations mensuelles budgétaires 2013+ : jeu repéré à la 2e inspection, pas encore vu.
+    Parser("sme_series_longues", "economie/situations-mensuelles-budgetaires-series-longues/**/*", _pending),
 ]
 
 
@@ -163,10 +167,12 @@ def write_validation_report(con: duckdb.DuckDBPyConnection, path: Path) -> None:
     lines += ["", f"{n_ok} contrôle(s) exact(s) à 0,01 M€ près (non listés), {len(rows) - n_ok} écart(s) listé(s).", ""]
     lines += ["## Couverture par exercice (exécution)", "",
               "Dépenses nettes = budget général hors remboursements et dégrèvements (programmes 200/201).", "",
+              "Une année alimentée par plus d'une source de dépenses est signalée ⚠ (risque de double compte).", "",
               "| exercice | programmes | dépenses nettes | dont titre 4 | recettes nettes | dette État (déc.) | PIB |",
               "|---|---:|---:|---:|---:|---:|---:|"]
     cov = con.execute(f"""
         WITH d AS (SELECT exercice, count(DISTINCT programme_code) np, sum(montant_meur) dep,
+                          count(DISTINCT source) ns,
                           sum(CASE WHEN titre_code = '4' THEN montant_meur END) t4
                    FROM depense WHERE nature = 'execution' AND {NET_FILTER} GROUP BY 1),
         r AS (SELECT exercice, sum(CASE WHEN categorie = 'prelevement' THEN -montant_meur ELSE montant_meur END) rec
@@ -176,12 +182,12 @@ def write_validation_report(con: duckdb.DuckDBPyConnection, path: Path) -> None:
         m AS (SELECT annee AS exercice, max(valeur_meur) FILTER (WHERE indicateur = 'pib_nominal') pib
               FROM macro GROUP BY 1),
         y AS (SELECT exercice FROM d UNION SELECT exercice FROM r UNION SELECT exercice FROM a)
-        SELECT y.exercice, np, dep, t4, rec, dette, pib FROM y LEFT JOIN d USING (exercice)
+        SELECT y.exercice, np, dep, t4, rec, dette, pib, ns FROM y LEFT JOIN d USING (exercice)
         LEFT JOIN r USING (exercice) LEFT JOIN a USING (exercice) LEFT JOIN m USING (exercice)
         ORDER BY 1""").fetchall()
     f = lambda v: "**manquant**" if v is None else f"{v:,.0f}"
-    for ex, np_, dep, t4, rec, dette, pib in cov:
-        lines.append(f"| {ex} | {np_ or '**0**'} | {f(dep)} | {f(t4)} | {f(rec)} | {f(dette)} | {f(pib)} |")
+    for ex, np_, dep, t4, rec, dette, pib, ns in cov:
+        lines.append(f"| {ex}{' ⚠ ' + str(ns) + ' sources' if (ns or 0) > 1 else ''} | {np_ or '**0**'} | {f(dep)} | {f(t4)} | {f(rec)} | {f(dette)} | {f(pib)} |")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

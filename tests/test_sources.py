@@ -190,7 +190,7 @@ def test_plf_recettes_and_depenses(tmp_path):
 SDMX = """<?xml version="1.0" encoding="UTF-8"?>
 <message:StructureSpecificData xmlns:message="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/message">
 <message:DataSet>
-<Series IDBANK="000000001" TITLE_FR="Encours de la dette négociable de l'État en euros" UNIT_MULT="9" UNIT_MEASURE="EUROS">
+<Series IDBANK="001739081" TITLE_FR="Encours de la dette négociable totale de l'État" UNIT_MULT="9" UNIT_MEASURE="EUROS">
   <Obs TIME_PERIOD="2023-12" OBS_VALUE="2,5"/><Obs TIME_PERIOD="2024-12" OBS_VALUE="3.0"/>
 </Series>
 <Series IDBANK="001711532" TITLE_FR="Encours de la dette négociable de l'État à court terme (maturité d'un an et moins) en euros" UNIT_MULT="9">
@@ -231,4 +231,141 @@ def test_inspect_cp1252_zip_and_catalog(tmp_path):
     assert "encodage : cp1252" in t and "Prélèvement" in t
     assert "nettes des remboursements" in t and "(zip) `data.csv`" in t
     assert "`plrg-2023` | PLRG 2023" in t
-    assert "000000001" in t and "2023-12 → 2024-12" in t
+    assert "001739081" in t and "2023-12 → 2024-12" in t
+
+
+# --- formats ajoutés après la 2e inspection -------------------------------------------
+
+PIVOT_2013 = """Gestion;2013;;;;;;;;;;;
+Type Budget;All;;;;;;;;;;;
+;;;;;;;;;;;;
+CP;;;;;TITRE;;;;;;;
+Mission;Programme;Libellé programme;Action;Libellé action;T1;T2;T3;T4;T5;T6;T7;Total général
+Accords monétaires internationaux;811;Relations UMOA;01;x;;;;0;;;;0
+Mission A;101;Programme A1;01;Action 1;;24 928 201;17 740 210;;98 139;-2 559;;42 764 991
+Mission A;101;Programme A1;02;Action 2;;1 000 000;;;;;;1 000 000
+Total général;;;;;;25 928 201;17 740 210;;98 139;-2 559;;43 764 991
+"""
+
+
+def test_exec_pivot_2013(tmp_path):
+    p = write(tmp_path / "economie/execution-2013-du-budget-de-letat-en-cp-et-ae-/attachments/"
+              "execution_2013_du_budget_de_l_etat_en_cp_suivant_la_nomenclature_mission_program", PIVOT_2013, "cp1252")
+    rows = {(r["programme_code"], r["titre_code"]): r["montant_meur"] for _, r in sources.parse_exec_titres(p)}
+    assert rows == {("101", "2"): pytest.approx(25.928201), ("101", "3"): pytest.approx(17.74021),
+                    ("101", "5"): pytest.approx(0.098139), ("101", "6"): pytest.approx(-0.002559)}
+    assert {r["exercice"] for _, r in sources.parse_exec_titres(p)} == {2013}
+
+
+def test_exec_pivot_ae_and_ministere_skipped(tmp_path):
+    for name in ("execution_2013_du_budget_de_l_etat_en_ae_et_cp_suivant_la_nomenclature_mission_p",
+                 "execution_2013_du_budget_de_l_etat_en_cp_suivant_la_nomenclature_ministere_progr",
+                 "plr2014_exec_min_cp_csv"):
+        p = write(tmp_path / "economie/x-2013/attachments" / name, PIVOT_2013)
+        with pytest.raises(sources.Skip):
+            list(sources.parse_exec_titres(p))
+
+
+DEST_NAT = ("annee_rap;type_de_budget_hors_budgets_annexes;code_mission;mission;code_programme;programme;code_action;"
+            "action;code_sous_action;sous_action;code_categorie;categorie;exec_ae_2018_rap_2018;exec_cp_2018_rap_2018;"
+            "code_titre;titre;code_ministere_au_1er_janvier_2018;ministere_au_1er_janvier_2018\n"
+            "2018;BG;AA;Mission A;101;Programme A1;01;a;;;21;Rém;9;2000000;2;Personnel;MIN01;M\n"
+            "2018;BG;AA;Mission A;101;Programme A1;02;b;;;21;Rém;9;1000000;2;Personnel;MIN01;M\n"
+            "2018;BG;AA;Mission A;101;Programme A1;02;b;;;31;Fonct;9;500000;3;Fonct;MIN01;M\n"
+            "2018;CAS;YE;CAS;753;P;01;c;;;31;F;9;7000000;3;F;MIN09;I\n")
+
+
+def test_destination_nature_csv_and_controle(tmp_path):
+    d = tmp_path / "raw/economie"
+    write(d / "projet-de-loi-de-reglement-2019-plr-20190/export.csv", DEST_NAT, "utf-8-sig")
+    write(d / "projet-de-loi-de-reglement-2019-plr-2019/export.csv",
+          "annee_rap;type_de_budget;code_mission;mission;code_programme;programme;exec_t2_ae_cp_2018_rap_2018;"
+          "exec_ae_hors_t2_2018_rap_2018;exec_cp_hors_t2_2018_rap_2018;exec_ae_t2_hors_t2_2018_rap_2018;"
+          "exec_cp_t2_hors_t2_2018_rap_2018;exec_etpt_2018_rap_2018\n"
+          "2018;Budget général;AA;Mission A;101;Programme A1;3000000;500000;500000;3500000;3500000;10\n"
+          "2018;Comptes d'affectation spéciale;YE;CAS;753;P;;7000000;7000000;7000000;7000000;\n")
+    write(d / "projet-de-loi-de-reglement-2019-plr-20191/export.csv",
+          "annee_rap;type_de_budget_hors_budgets_annexes;code_programme;t1_exec_ae_2018;t1_exec_cp_2018\n2018;BG;101;;\n")
+    dbp = tmp_path / "b.duckdb"
+    assert ingest.run(tmp_path / "raw", dbp) == 0
+    con = connect(dbp, read_only=True)
+    assert con.execute("SELECT exercice, titre_code, categorie_code, montant_meur FROM depense ORDER BY 2").fetchall() == \
+        [(2018, "2", "21", 3.0), (2018, "3", "31", 0.5)]  # exercice lu dans annee_rap (id du jeu : 2019)
+    assert "programme 101" not in (tmp_path / "VALIDATION.md").read_text()  # contrôle exact
+
+
+def test_destination_nature_xlsx(tmp_path):
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Titre du tableau"])
+    for line in DEST_NAT.strip().split("\n"):
+        ws.append(line.split(";"))
+    p = tmp_path / "economie/projet-de-loi-de-reglement-2020-plr-2020/attachments/plr2020_credits_destination_nature_xls"
+    p.parent.mkdir(parents=True)
+    wb.save(p)
+    rows = [r for _, r in sources.parse_plr_attachment(p)]
+    assert sum(r["montant_meur"] for r in rows) == pytest.approx(3.5)
+
+
+RECETTES_NETTES_2014 = """(en million d'euros);column1;column2
+Désignation des recettes;Exécution 2012;Évaluation initiale pour 2013
+;;
+ A. Recettes fiscales;358 997;394 780
+ 1 Impôt sur le revenu;65 510;77 298
+ B. Remboursements et dégrèvements;90 559;96 163
+ 1. Impôt sur le revenu;6 030;5 396
+3. Taxe sur la valeur ajoutée;51 262;54 500
+ C. Recettes fiscales nettes;268 438;298 617
+1. Impôt sur le revenu net (A.1 - B.1);59 480;71 902
+2. Impôt sur les sociétés net (A.3 - B.2);40 832;53 531
+3. TICPE (brute A5);13 498;13 680
+4. Taxe sur la valeur ajoutée - nette (A.6 - B.3);133 403;141 245
+5. Autres recettes fiscales - nettes (A.2 + A.3bis);21 224;18 259
+ D. Recettes non fiscales;14 110;14 209
+ E. Prélèvements sur les recettes de l'État;74 635;76 128
+  Prélèvements sur les recettes de l'État au profit des collectivités territoriales;55 584;55 693
+  Prélèvement sur les recettes de l'État au profit de l'Union européenne;19 052;20 435
+"""
+
+
+def test_recettes_nettes(tmp_path):
+    p = write(tmp_path / "plf-2014-recettes-fiscales-nettes/attachments/plf_2014_recettes_fiscales_nettes_csv",
+              RECETTES_NETTES_2014, "cp1252")
+    out = list(sources.parse_recettes_nettes(p))
+    rec = {r["poste_code"]: r["montant_meur"] for t, r in out if t == "recette"}
+    assert rec == {"IR": 59480, "IS": 40832, "TICPE": 13498, "TVA": 133403, "AUTRES": 21224, "NF": 14110,
+                   "PSR_COLL": 55584, "PSR_UE": 19052}
+    assert {r["exercice"] for _, r in out} == {2012}
+    ctl = {r["cle"]: r["reference"] for t, r in out if t == "controle"}
+    assert ctl == {"recettes fiscale": 268438, "recettes prelevement": 74635}
+    # Montants publiés arrondis au M€ : la somme des lignes diffère du total de 1 M€.
+    assert sum(v for k, v in rec.items() if k in ("IR", "IS", "TICPE", "TVA", "AUTRES")) == pytest.approx(ctl["recettes fiscale"], abs=5)
+
+
+def test_recettes_nettes_thousands_and_unknown_layout(tmp_path):
+    p = write(tmp_path / "plf-2012/x_csv", "(En milliers d’euros);;Exécution 2010\n;Impôt net sur le revenu;47433070\n")
+    with pytest.raises(sources.UnknownFormat, match="lignes nettes"):
+        list(sources.parse_recettes_nettes(p))
+
+
+def test_inspect_xlsx_and_pdf(tmp_path):
+    import openpyxl
+    from pypdf import PdfWriter
+
+    wb = openpyxl.Workbook()
+    wb.active.append(["code_programme", "exec_cp_2019"])
+    wb.active.append(["101", "12"])
+    raw = tmp_path / "raw"
+    (raw / "x").mkdir(parents=True)
+    wb.save(raw / "x" / "plr2019_credits_destination_nature_xls")
+    w = PdfWriter()
+    w.add_blank_page(100, 100)
+    buf = io.BytesIO()
+    w.write(buf)
+    (raw / "x" / "notice.pdf").write_bytes(buf.getvalue())
+    rep = tmp_path / "I.md"
+    assert inspect_raw.run(raw, rep) == 0
+    t = rep.read_text()
+    assert "feuille `Sheet`" in t and "code_programme ; exec_cp_2019" in t and "PDF, 1 pages" in t

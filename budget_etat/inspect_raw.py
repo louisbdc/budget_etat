@@ -62,7 +62,7 @@ def profile_table(con: duckdb.DuckDBPyConnection) -> list[str]:
         ).fetchall()
         vals = ", ".join(f"`{v}` ({k})" for v, k in rows)
         out.append(f"\n- **`{name}`** : {vals}")
-    limit = n if n <= 60 else 12  # petit fichier : on montre tout
+    limit = n if n <= 120 else 12  # petit fichier : on montre tout
     sample = con.execute(f"SELECT * FROM t LIMIT {limit}").fetchall()
     out.append(f"\nExemple ({limit} premières lignes) :\n```")
     out.append(" ; ".join(c[0] for c in cols))
@@ -120,9 +120,44 @@ def describe_sdmx(data: bytes) -> list[str]:
     return out or ["(aucune série SDMX trouvée)"]
 
 
+def describe_workbook(data: bytes, tmpdir: Path) -> list[str]:
+    from budget_etat.sources import read_sheets
+
+    tmp = tmpdir / "classeur"
+    tmp.write_bytes(data)
+    out = []
+    for name, grid in read_sheets(tmp):
+        width = max((len(r) for r in grid), default=0)
+        out.append(f"\n### feuille `{name}` — {len(grid)} lignes × {width} colonnes\n")
+        limit = len(grid) if len(grid) <= 120 else 25
+        out.append(f"{limit} premières lignes :\n```")
+        out += [" ; ".join(r).rstrip(" ;")[:600] for r in grid[:limit]]
+        out.append("```")
+    return out
+
+
+def describe_pdf(data: bytes) -> list[str]:
+    """Texte de la 1re et de la dernière page + toutes les lignes de note (« * »)."""
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(data))
+    pages = [p.extract_text() or "" for p in reader.pages]
+    notes = [l.strip() for t in pages for l in t.splitlines() if l.strip().startswith("*") or "**" in l]
+    out = [f"PDF, {len(pages)} pages. Début :", "```", pages[0][:1500] if pages else "", "```"]
+    if notes:
+        out += ["Notes (lignes contenant « * ») :", "```", "\n".join(dict.fromkeys(notes))[:2000], "```"]
+    return out
+
+
 def _profile_bytes(con, name: str, data: bytes, tmpdir: Path) -> list[str]:
     suffix = Path(name).suffix.lower()
     head = data.lstrip()[:1]
+    if data[:4] == b"\xd0\xcf\x11\xe0":
+        return describe_workbook(data, tmpdir)
+    if data[:5] == b"%PDF-":
+        return describe_pdf(data)
+    if zipfile.is_zipfile(io.BytesIO(data)) and "[Content_Types].xml" in zipfile.ZipFile(io.BytesIO(data)).namelist():
+        return describe_workbook(data, tmpdir)
     if zipfile.is_zipfile(io.BytesIO(data)):
         out = []
         with zipfile.ZipFile(io.BytesIO(data)) as z:
@@ -145,7 +180,7 @@ def _profile_bytes(con, name: str, data: bytes, tmpdir: Path) -> list[str]:
         if name.endswith("_catalog_all.json"):
             return describe_catalog(obj)
         return describe_json(obj)
-    if suffix in (".pdf", ".xlsx", ".xls", ".docx", ".odt", ".ods"):
+    if suffix in (".docx", ".odt", ".ods"):
         return [f"(format {suffix} non profilé)"]
     enc = _open_csv(con, data, tmpdir)
     return [f"encodage : {enc}"] + profile_table(con)

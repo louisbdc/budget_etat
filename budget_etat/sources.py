@@ -69,6 +69,40 @@ def read_rows(path: Path) -> tuple[list[str], list[dict]]:
     return headers, rows
 
 
+def read_sheets(path: Path) -> list[tuple[str, list[list[str]]]]:
+    """Feuilles d'un fichier tabulaire (CSV, .xls BIFF ou .xlsx) en grilles de chaînes."""
+    data = path.read_bytes()
+    if data[:4] == b"\xd0\xcf\x11\xe0":  # OLE2 : Excel 97-2003
+        import xlrd
+
+        book = xlrd.open_workbook(file_contents=data)
+        return [(sh.name, [["" if c.value is None else str(c.value).strip() for c in sh.row(i)]
+                           for i in range(sh.nrows)]) for sh in book.sheets()]
+    if data[:2] == b"PK":  # OOXML : .xlsx
+        import openpyxl
+
+        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        return [(ws.title, [["" if v is None else str(v).strip() for v in row] for row in ws.iter_rows(values_only=True)])
+                for ws in wb.worksheets]
+    text, _ = decode_bytes(data)
+    first = text.split("\n", 1)[0]
+    delim = max((";", ",", "\t"), key=first.count)
+    return [("csv", [[c.strip() for c in row] for row in csv.reader(io.StringIO(text), delimiter=delim)])]
+
+
+def find_header(grid: list[list[str]], required: set[str], max_rows: int = 30) -> int | None:
+    """Indice de la première ligne dont les en-têtes normalisés contiennent `required`."""
+    for i, row in enumerate(grid[:max_rows]):
+        if required <= {_norm_header(c) for c in row}:
+            return i
+    return None
+
+
+def grid_rows(grid: list[list[str]], header: int) -> tuple[list[str], list[dict]]:
+    headers = [_norm_header(c) for c in grid[header]]
+    return headers, [dict(zip(headers, r)) for r in grid[header + 1:] if any(c for c in r)]
+
+
 def to_float(v) -> float | None:
     """'1 234,56' / '1234.0' / '-8836054,82' -> float ; vide -> None."""
     if v is None:
@@ -83,6 +117,14 @@ def to_float(v) -> float | None:
     elif "," in s:
         s = s.replace(",", ".")
     return float(s)
+
+
+def try_float(v) -> float | None:
+    """Comme to_float, mais None pour un texte non numérique (cellules de libellé)."""
+    try:
+        return to_float(v)
+    except ValueError:
+        return None
 
 
 def meur(v) -> float | None:
@@ -146,18 +188,31 @@ def parse_exec_titres(path: Path) -> Iterator[Row]:
     n = _norm_header(name)
     if not re.search(r"en_cp|exec_msn_cp", n) or re.search(r"ae_et_cp|ministere|compte", n):
         raise Skip("pas un fichier CP du budget général en nomenclature mission")
-    headers, rows = read_rows(path)
-    h = {_norm_header(x): x for x in headers}
-    pick = lambda key: next((h[a] for a in EXEC_ALIASES[key] if a in h), None)
-    prog, lib, mission = pick("programme"), pick("programme_lib"), pick("mission")
-    titres = [(str(k), h[f"t{k}"]) for k in range(1, 8) if f"t{k}" in h]
-    if not prog or len(titres) < 5:
-        raise UnknownFormat(f"en-têtes {headers}")
+    (_, grid), = read_sheets(path)[:1]
     ex = year_from_path(path)
+    # Export « tableau croisé » (2013, 2014) : lignes de titre puis l'en-tête réel.
+    hdr = find_header(grid, {"mission", "programme", "t1", "t2"})
+    if hdr is not None and hdr > 0:
+        years = [int(c) for row in grid[:hdr] for c in row if re.fullmatch(r"(19|20)\d{2}", c)]
+        ex = years[0] if years else ex
+    else:
+        hdr = 0
+    headers, rows = grid_rows(grid, hdr)
+    h = set(headers)
+    pick = lambda key: next((a for a in EXEC_ALIASES[key] if a in h), None)
+    prog, lib, mission = pick("programme"), pick("programme_lib"), pick("mission")
+    titres = [(str(k), f"t{k}") for k in range(1, 8) if f"t{k}" in h]
+    if not prog or len(titres) < 5:
+        raise UnknownFormat(f"en-têtes {grid[hdr]}")
     agg: dict[tuple, float] = defaultdict(float)
     labels: dict[tuple, tuple] = {}
     for r in rows:
-        code = str(r[prog]).strip().zfill(3)
+        raw = str(r.get(prog) or "").strip()
+        if raw.endswith(".0"):
+            raw = raw[:-2]
+        if not raw.isdigit():
+            continue  # lignes de total, de titre ou vides
+        code = raw.zfill(3)
         if perimetre_programme(code) != "BG":
             continue
         for t, col in titres:
@@ -167,10 +222,76 @@ def parse_exec_titres(path: Path) -> Iterator[Row]:
             key = (code, t)
             agg[key] += v
             labels[key] = (r.get(mission) if mission else None, r.get(lib))
-    src = f"data.economie {path.parent.name}"
+    src = f"data.economie {path.parent.name if path.name == 'export.csv' else path.name}"
     for (code, t), v in sorted(agg.items()):
         m, l = labels[(code, t)]
         yield _dep(ex, m, code, l, t, v, src)
+
+
+# --- exécution « destination × nature » (PLR 2018 et suivants) ------------------
+
+def _exec_cp_column(headers: list[str]) -> tuple[str, int] | None:
+    for h in headers:
+        m = re.fullmatch(r"exec_cp_((?:19|20)\d{2})(?:_.*)?", h)
+        if m:
+            return h, int(m.group(1))
+    return None
+
+
+def _is_bg(r: dict, code: str) -> bool:
+    tb = next((v for k, v in r.items() if k.startswith("type_de_budget")), None)
+    if tb:
+        return _norm_header(tb) in ("bg", "budget_general")
+    return perimetre_programme(code) == "BG"
+
+
+def parse_destination_nature(path: Path) -> Iterator[Row]:
+    """Une ligne par programme × action × (sous-action) × catégorie, CP exécutés en €."""
+    for _, grid in read_sheets(path):
+        hdr = find_header(grid, {"code_programme", "code_titre", "code_categorie"})
+        if hdr is None:
+            continue
+        headers, rows = grid_rows(grid, hdr)
+        col = _exec_cp_column(headers)
+        if not col:
+            raise UnknownFormat(f"pas de colonne exec_cp_AAAA : {grid[hdr]}")
+        col, ex = col
+        agg: dict[tuple, float] = defaultdict(float)
+        for r in rows:
+            code = str(r["code_programme"]).removesuffix(".0").zfill(3)
+            if not code.isdigit() or not _is_bg(r, code):
+                continue
+            ex_row = int(to_float(r["annee_rap"])) if r.get("annee_rap", "").replace(".0", "").isdigit() else ex
+            key = (ex_row, r.get("mission"), code, r.get("programme"), str(r["code_titre"]).removesuffix(".0"),
+                   str(r["code_categorie"]).removesuffix(".0"))
+            agg[key] += meur(r[col]) or 0.0
+        for (e, m, code, lib, t, cat), v in agg.items():
+            yield _dep(e, m, code, lib, t, v, f"PLR {e} destination × nature ({path.parent.name})", categorie=cat)
+        return
+    raise UnknownFormat("aucune feuille avec code_programme / code_titre / code_categorie")
+
+
+def parse_plr_export(path: Path) -> Iterator[Row]:
+    """Exports CSV des jeux « projet de loi de règlement » : trois variantes."""
+    (_, grid), = read_sheets(path)[:1]
+    headers = [_norm_header(c) for c in grid[0]] if grid else []
+    if {"code_programme", "code_titre", "code_categorie"} <= set(headers):
+        yield from parse_destination_nature(path)
+    elif any(re.fullmatch(r"exec_cp_t2_hors_t2_\d{4}.*", h) for h in headers):
+        # Synthèse par programme (T2 + hors T2) : sert de contrôle.
+        col = next(h for h in headers if re.fullmatch(r"exec_cp_t2_hors_t2_\d{4}.*", h))
+        _, rows = grid_rows(grid, 0)
+        for r in rows:
+            code = str(r["code_programme"]).zfill(3)
+            if not _is_bg(r, code):
+                continue
+            ex = int(to_float(r["annee_rap"]))
+            yield "controle", dict(exercice=ex, cle=f"programme {code}", reference=meur(r[col]) or 0.0,
+                                   source=f"PLR {ex} synthèse par programme ({path.parent.name})")
+    elif any(re.fullmatch(r"t\d_exec_cp_\d{4}", h) for h in headers):
+        raise Skip("tableau croisé par titre : doublon de destination × nature")
+    else:
+        raise UnknownFormat(f"en-têtes {grid[0] if grid else []}")
 
 
 # --- PLRG : annexes de l'état budgétaire --------------------------------------
@@ -255,6 +376,67 @@ def parse_plrg_recettes(path: Path) -> Iterator[Row]:
                               montant_meur=-v if c == "prelevement" else v, source=src)
 
 
+# --- PLF : tableau « recettes fiscales nettes » (colonne Exécution N-2) ----------
+
+RECETTES_NETTES = [
+    # (motif sur le libellé normalisé, catégorie, code, libellé canonique)
+    (r"^1\.\s*impot sur le revenu net", "fiscale", "IR", "Impôt sur le revenu (net)"),
+    (r"^2\.\s*impot sur les societes net", "fiscale", "IS", "Impôt sur les sociétés (net)"),
+    (r"^3\.\s*ticpe", "fiscale", "TICPE", "TICPE"),
+    (r"^4\.\s*taxe sur la valeur ajoutee.*nette", "fiscale", "TVA", "Taxe sur la valeur ajoutée (nette)"),
+    (r"^5\.\s*autres recettes fiscales.*nettes", "fiscale", "AUTRES", "Autres recettes fiscales (nettes)"),
+    (r"^d\.\s*recettes non fiscales", "non_fiscale", "NF", "Recettes non fiscales"),
+    (r"au profit des collectivites", "prelevement", "PSR_COLL", "Prélèvements au profit des collectivités territoriales"),
+    (r"au profit de l.union europeenne", "prelevement", "PSR_UE", "Prélèvement au profit de l'Union européenne"),
+]
+RECETTES_NETTES_CONTROLES = [(r"^c\.\s*recettes fiscales nettes", "recettes fiscale"),
+                             (r"^e\.\s*prelevements", "recettes prelevement")]
+
+
+def _plain(s: str) -> str:
+    import unicodedata
+
+    return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower().strip()
+
+
+def parse_recettes_nettes(path: Path) -> Iterator[Row]:
+    (_, grid), = read_sheets(path)[:1]
+    unit = _plain(grid[0][0]) if grid and grid[0] else ""
+    factor = 1e-3 if "milliers" in unit else 1.0 if "million" in unit else None
+    if factor is None:
+        raise UnknownFormat(f"unité introuvable dans {grid[0][:1] if grid else None}")
+    col = ex = None
+    for i, row in enumerate(grid[:6]):
+        for j, c in enumerate(row):
+            if _plain(c).startswith("execution"):
+                col = j
+                m = re.search(r"(19|20)\d{2}", c) or re.search(r"(19|20)\d{2}", grid[i + 1][j] if i + 1 < len(grid) else "")
+                ex = int(m.group(0)) if m else None
+                break
+        if col is not None:
+            break
+    if col is None or ex is None:
+        raise UnknownFormat("colonne « Exécution AAAA » introuvable")
+    src = f"PLF {ex + 2} recettes fiscales nettes (exécution {ex})"
+    found = {}
+    for row in grid:
+        label = _plain(" ".join(c for c in row[:col] if c))
+        v = try_float(row[col]) if col < len(row) else None
+        if not label or v is None:
+            continue
+        for rx, cat, code, lib in RECETTES_NETTES:
+            if re.search(rx, label) and code not in found:
+                found[code] = (cat, lib, v * factor)
+        for rx, cle in RECETTES_NETTES_CONTROLES:
+            if re.search(rx, label):
+                yield "controle", dict(exercice=ex, cle=cle, reference=v * factor, source=src)
+    if not {"IR", "IS", "TVA", "NF"} <= set(found):
+        raise UnknownFormat(f"lignes nettes non reconnues (trouvées : {sorted(found)})")
+    for code, (cat, lib, v) in found.items():
+        yield "recette", dict(exercice=ex, mois=None, periode="annuel", nature="execution", categorie=cat, sens="net",
+                              poste_code=code, poste_lib=lib, montant_meur=v, source=src)
+
+
 # --- PLF / LFI -----------------------------------------------------------------
 
 def parse_plf_recettes(path: Path) -> Iterator[Row]:
@@ -307,10 +489,11 @@ def parse_sdmx(data: bytes) -> list[dict]:
     return out
 
 
-# Série retenue pour la dette de l'État : titre contenant « dette négociable »
-# sans précision de maturité (court / moyen / long terme).
-DETTE_TITRE = re.compile(r"dette n[ée]gociable", re.I)
-DETTE_EXCLU = re.compile(r"court|moyen|long|terme|maturit|vie moyenne|taux|indexée", re.I)
+# Série retenue pour la dette de l'État (identifiée à la 2e inspection) :
+# « Encours de la dette négociable totale de l'État », mensuelle, UNIT_MULT=6.
+# Les autres séries de la famille (maturités, devises, variations) sont
+# conservées dans la table `serie` mais jamais additionnées.
+DETTE_IDBANK = "001739081"
 
 
 def parse_insee(path: Path) -> Iterator[Row]:
@@ -323,7 +506,7 @@ def parse_insee(path: Path) -> Iterator[Row]:
                 continue
             yield "serie", dict(source="INSEE", serie=idbank, titre=titre, periode=o["TIME_PERIOD"], valeur=v,
                                 unite=a.get("UNIT_MEASURE"), puissance=to_float(a.get("UNIT_MULT")))
-        if DETTE_TITRE.search(titre) and not DETTE_EXCLU.search(titre):
+        if idbank == DETTE_IDBANK:
             if a.get("UNIT_MULT") is None:
                 raise UnknownFormat(f"série {idbank} sans UNIT_MULT : unité inconnue ({a})")
             mult = 10 ** int(a["UNIT_MULT"])
@@ -347,5 +530,7 @@ def parse_plr_attachment(path: Path) -> Iterator[Row]:
         yield from parse_plrg_recettes(path)
     elif "exec_msn_cp" in n:
         yield from parse_exec_titres(path)
+    elif "credits_destination_nature" in n:
+        yield from parse_destination_nature(path)
     else:
         raise Skip("pièce jointe non utilisée")

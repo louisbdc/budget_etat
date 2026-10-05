@@ -48,15 +48,19 @@ ODS_INCLUDE = [
     r"recettes fiscales nettes",
     r"recettes du budget general",
     r"depenses .*selon destination",
+    r"situations mensuelles budgetaires",  # SME en données, 2013 à nos jours
 ]
-ODS_EXCLUDE = [r"performance", r"budget vert", r"-en-ae$", r"comptes-d", r"ministere-progr"]
+# Attention : « approbation-des-comptes-de-lannee » (PLRG) ne doit pas être exclu.
+ODS_EXCLUDE = [r"performance", r"budget vert", r"-en-ae$", r"comptes-daffectation", r"comptes-de-concours",
+               r"ministere-progr"]
 ODS_MAX_AUTO = 120  # garde-fou
 
 # --- INSEE (BDM) : dette négociable de l'État -------------------------------
 # La page de la famille BDM liste les identifiants de séries ; on les télécharge
-# ensuite via l'API SDMX publique. 001711532 (court terme) est connu d'avance.
+# ensuite via l'API SDMX publique. 001739081 (encours total) a été identifié à
+# la 2e inspection ; c'est la seule série retenue comme dette de l'État.
 INSEE_FAMILLES = {"dette_negociable": "https://www.insee.fr/fr/plan-du-site/famille-bdm/102765717"}
-INSEE_SERIES_CONNUES = ["001711532"]
+INSEE_SERIES_CONNUES = ["001739081"]
 INSEE_SDMX = "https://bdm.insee.fr/series/sdmx/data/SERIES_BDM"
 
 # --- Eurostat (JSON-stat) : agrégats APU au sens de Maastricht et PIB --------
