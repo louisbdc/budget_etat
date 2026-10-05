@@ -61,6 +61,7 @@ def decode_bytes(data: bytes) -> tuple[str, str]:
 
 def read_rows(path: Path) -> tuple[list[str], list[dict]]:
     text, _ = decode_bytes(path.read_bytes())
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     first = text.split("\n", 1)[0]
     delim = max((";", ",", "\t"), key=first.count)
     reader = csv.DictReader(io.StringIO(text), delimiter=delim)
@@ -85,6 +86,8 @@ def read_sheets(path: Path) -> list[tuple[str, list[list[str]]]]:
         return [(ws.title, [["" if v is None else str(v).strip() for v in row] for row in ws.iter_rows(values_only=True)])
                 for ws in wb.worksheets]
     text, _ = decode_bytes(data)
+    # Certains fichiers DGFiP ont des fins de ligne CR seules (ancien format Mac).
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     first = text.split("\n", 1)[0]
     delim = max((";", ",", "\t"), key=first.count)
     return [("csv", [[c.strip() for c in row] for row in csv.reader(io.StringIO(text), delimiter=delim)])]
@@ -239,36 +242,86 @@ def _exec_cp_column(headers: list[str]) -> tuple[str, int] | None:
 
 
 def _is_bg(r: dict, code: str) -> bool:
-    tb = next((v for k, v in r.items() if k.startswith("type_de_budget")), None)
+    tb = next((v for k, v in r.items() if k.startswith("type_de_budget") or k == "typebudget"), None)
     if tb:
         return _norm_header(tb) in ("bg", "budget_general")
     return perimetre_programme(code) == "BG"
 
 
+def _code(v) -> str:
+    """'105.0' -> '105' ; '22.0' -> '22'."""
+    s = str(v or "").strip()
+    return s[:-2] if s.endswith(".0") else s
+
+
+def load_nomenclature(directory: Path) -> tuple[dict[str, str], dict[str, tuple[str, str]]]:
+    """Classeur « nomenclature » joint aux PLR 2019+ : missions (MSN) et programmes (PGM)."""
+    missions: dict[str, str] = {}
+    programmes: dict[str, tuple[str, str]] = {}
+    for f in sorted(directory.glob("*nomenclature*")):
+        for _, grid in read_sheets(f):
+            hdr = find_header(grid, {"type_ligne", "code", "mission", "libelle"})
+            if hdr is None:
+                continue
+            for r in grid_rows(grid, hdr)[1]:
+                if r.get("type_ligne") == "MSN":
+                    missions[r["code"]] = r["libelle"]
+                elif r.get("type_ligne") == "PGM":
+                    programmes[_code(r["code"]).zfill(3)] = (r["libelle"], r.get("mission", ""))
+    return missions, programmes
+
+
+# Deux variantes d'en-têtes observées pour « destination × nature » :
+# PLR 2018 (export CSV) : code_programme, code_titre, code_categorie, exec_cp_2018_rap_2018, annee_rap, libellés ;
+# PLR 2019–2020 (xls)   : programme, titre, categorie, « CP EXEC », exercice, mission = code (libellés à part).
+DEST_NAT_VARIANTES = [
+    {"programme": "code_programme", "titre": "code_titre", "categorie": "code_categorie", "exercice": "annee_rap"},
+    {"programme": "programme", "titre": "titre", "categorie": "categorie", "exercice": "exercice", "cp": "cp_exec"},
+]
+
+
 def parse_destination_nature(path: Path) -> Iterator[Row]:
     """Une ligne par programme × action × (sous-action) × catégorie, CP exécutés en €."""
     for _, grid in read_sheets(path):
-        hdr = find_header(grid, {"code_programme", "code_titre", "code_categorie"})
-        if hdr is None:
+        for v in DEST_NAT_VARIANTES:
+            need = {v["programme"], v["titre"], v["categorie"]} | ({v["cp"]} if "cp" in v else set())
+            hdr = find_header(grid, need)
+            if hdr is not None:
+                break
+        else:
             continue
         headers, rows = grid_rows(grid, hdr)
-        col = _exec_cp_column(headers)
-        if not col:
-            raise UnknownFormat(f"pas de colonne exec_cp_AAAA : {grid[hdr]}")
-        col, ex = col
+        if "cp" in v:
+            col, ex = v["cp"], None
+        else:
+            found = _exec_cp_column(headers)
+            if not found:
+                raise UnknownFormat(f"pas de colonne exec_cp_AAAA : {grid[hdr]}")
+            col, ex = found
+        missions, programmes = load_nomenclature(path.parent) if "cp" in v else ({}, {})
         agg: dict[tuple, float] = defaultdict(float)
         for r in rows:
-            code = str(r["code_programme"]).removesuffix(".0").zfill(3)
+            code = _code(r[v["programme"]]).zfill(3)
             if not code.isdigit() or not _is_bg(r, code):
                 continue
-            ex_row = int(to_float(r["annee_rap"])) if r.get("annee_rap", "").replace(".0", "").isdigit() else ex
-            key = (ex_row, r.get("mission"), code, r.get("programme"), str(r["code_titre"]).removesuffix(".0"),
-                   str(r["code_categorie"]).removesuffix(".0"))
+            e = _code(r.get(v["exercice"]))
+            e = int(e) if e.isdigit() else ex
+            if e is None:
+                raise UnknownFormat("exercice introuvable")
+            m = r.get("mission")
+            lib = r.get("programme") if v["programme"] == "code_programme" else None
+            if code in programmes:
+                lib, mcode = programmes[code]
+                m = missions.get(mcode, m)
+            elif m in missions:
+                m = missions[m]
+            key = (e, m, code, lib, _code(r[v["titre"]]), _code(r[v["categorie"]]))
             agg[key] += meur(r[col]) or 0.0
-        for (e, m, code, lib, t, cat), v in agg.items():
-            yield _dep(e, m, code, lib, t, v, f"PLR {e} destination × nature ({path.parent.name})", categorie=cat)
+        src = f"PLR {{e}} destination × nature ({path.parent.name})"
+        for (e, m, code, lib, t, cat), val in agg.items():
+            yield _dep(e, m, code, lib, t, val, src.format(e=e), categorie=cat)
         return
-    raise UnknownFormat("aucune feuille avec code_programme / code_titre / code_categorie")
+    raise UnknownFormat("aucune feuille au format destination × nature")
 
 
 def parse_plr_export(path: Path) -> Iterator[Row]:

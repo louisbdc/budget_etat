@@ -32,6 +32,7 @@ def _q(name: str) -> str:
 def _open_csv(con: duckdb.DuckDBPyConnection, data: bytes, tmpdir: Path) -> str:
     """Décode en Python (utf-8 / cp1252 / latin-1), réécrit en UTF-8, crée la vue `t`."""
     text, enc = decode_bytes(data)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")  # fins de ligne CR seules
     tmp = tmpdir / "f.csv"
     tmp.write_text(text, encoding="utf-8")
     con.execute(f"CREATE OR REPLACE VIEW t AS SELECT * FROM read_csv('{tmp}', sample_size=-1, null_padding=true)")

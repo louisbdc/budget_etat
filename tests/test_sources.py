@@ -428,3 +428,50 @@ def test_smb_priority_dedup_and_official_series(tmp_path):
     # détail : 8 + 1,5 (P117) + 0,5 (P201 gardé depuis 2023) = 10 = SMB ; P200 exclu
     assert "| 2024 | dépenses nettes | 10 | 10 | 0.0 |" in report
     assert "PLRG 2024 annexe1_etat_recettes" in report  # source écartée, journalisée
+
+
+# --- 4e inspection : fins de ligne CR, PLR 2019-2020 (xls + nomenclature) -------------------
+
+def test_cr_only_line_endings(tmp_path):
+    p = tmp_path / "series_longues_smb_dgfip_2013_2023_csv"
+    p.write_bytes((SMB_HEAD.format(y=2013) + SMB_ROWS).replace("\n", "\r").encode("utf-8"))
+    agg = {(r["indicateur"], r["exercice"], r["mois"]): r["montant_meur"]
+           for t, r in sources.parse_smb(p) if t == "agregat_etat"}
+    assert agg[("solde", 2013, 12)] == -160
+
+
+def _xlsx(path, rows):
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    for r in rows:
+        wb.active.append(r)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(path)
+
+
+def test_destination_nature_plr2019_variant_with_nomenclature(tmp_path):
+    d = tmp_path / "economie/projet-de-loi-de-reglement-2019-plr-20192/attachments"
+    _xlsx(d / "plr2019_credits_destination_nature_xls", [
+        ["exercice", "loi", "typeBudget", "ministere", "mission", "programme", "action", "sous_action",
+         "categorie", "titre", "AE EXEC", "CP EXEC"],
+        ["2019", "PLR", "BG", "01", "AA", "105", "105-01", None, "22.0", "2", 1.0, 2000000.0],
+        ["2019", "PLR", "BG", "01", "AA", "105", "105-02", None, "22.0", "2", 1.0, 1000000.0],
+        [2020.0, "PLR", "BG", 7.0, "TR", 348.0, "348-11", None, 31.0, 3.0, 1.0, 500000.0],
+        ["2019", "PLR", "CAS", "21", "YK", "793", "793-08", None, "31", "3", 1.0, 9000000.0],
+    ])
+    _xlsx(d / "plr2019_nomenclature_xls", [
+        ["Type ligne", "Type Budget", "code", "Mission", "Ministere", "Libelle", "Libelle abrege", "commentFP"],
+        ["MSN", "BG", "AA", None, None, "Action extérieure de l'État", "AEE", None],
+        ["PGM", "BG", "105.0", "AA", "01", "Action de la France en Europe et dans le monde", "x", None],
+        ["ACT", "BG", "105-01", None, None, "Coordination", None, None],
+    ])
+    rows = [r for _, r in sources.parse_plr_attachment(d / "plr2019_credits_destination_nature_xls")]
+    got = {(r["exercice"], r["programme_code"], r["titre_code"], r["categorie_code"]): r for r in rows}
+    assert set(got) == {(2019, "105", "2", "22"), (2020, "348", "3", "31")}  # CAS exclu, actions agrégées
+    r = got[(2019, "105", "2", "22")]
+    assert r["montant_meur"] == 3.0 and r["mission_lib"] == "Action extérieure de l'État"
+    assert r["programme_lib"] == "Action de la France en Europe et dans le monde"
+    assert got[(2020, "348", "3", "31")]["mission_lib"] == "TR"  # code gardé faute de libellé
+    with pytest.raises(sources.Skip):  # le classeur de nomenclature n'est pas une source de montants
+        list(sources.parse_plr_attachment(d / "plr2019_nomenclature_xls"))
