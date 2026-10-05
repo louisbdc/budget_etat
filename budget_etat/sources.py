@@ -527,8 +527,16 @@ SMB_LIGNES = [
 
 
 def _smb_date(h: str) -> tuple[int, int] | None:
-    m = re.fullmatch(r"(\d{1,2})[_/.-](\d{1,2})[_/.-]((?:19|20)\d{2})", h.strip())
-    return (int(m.group(3)), int(m.group(2))) if m else None
+    """En-tête de colonne -> (année, mois). Formats : jj_mm_aaaa (observé), jj/mm/aaaa,
+    aaaa-mm-jj, aaaa-mm, mm/aaaa."""
+    h = h.strip().split(" ")[0]
+    for rx, y, mo in [(r"(\d{1,2})[_/.-](\d{1,2})[_/.-]((?:19|20)\d{2})", 3, 2),
+                      (r"((?:19|20)\d{2})[_/.-](\d{1,2})(?:[_/.-]\d{1,2})?", 1, 2),
+                      (r"(\d{1,2})[_/.-]((?:19|20)\d{2})", 2, 1)]:
+        m = re.fullmatch(rx, h)
+        if m and 1 <= int(m.group(mo)) <= 12:
+            return int(m.group(y)), int(m.group(mo))
+    return None
 
 
 def parse_smb(path: Path) -> Iterator[Row]:

@@ -187,7 +187,23 @@ def deduplicate(con: duckdb.DuckDBPyConnection) -> list[str]:
     return log
 
 
-def write_validation_report(con: duckdb.DuckDBPyConnection, path: Path, dedup_log: list[str] | None = None) -> None:
+def _status_section(statuses: list[tuple[str, str, str, str]]) -> list[str]:
+    """Statut de chaque fichier brut : ce qui n'est pas ingéré d'abord, avec la raison."""
+    order = {"erreur": 0, "à inspecter": 1, "⚠ aucune ligne": 2, "ingéré": 3, "ignoré": 4}
+    out = ["## Statut des fichiers", "",
+           f"{sum(1 for s in statuses if s[2] == 'ingéré')} ingéré(s), "
+           f"{sum(1 for s in statuses if s[2] == 'ignoré')} ignoré(s) (doublons AE, comptes spéciaux, annexes non utilisées), "
+           f"{sum(1 for s in statuses if s[2] in ('erreur', 'à inspecter', '⚠ aucune ligne'))} à regarder.", "",
+           "| statut | fichier | parseur | détail |", "|---|---|---|---|"]
+    for rel, parser, status, detail in sorted(statuses, key=lambda s: (order.get(s[2], 9), s[0])):
+        if status == "ignoré":
+            continue
+        out.append(f"| {status} | `{rel}` | {parser} | {detail.replace('|', '/')} |")
+    return out + [""]
+
+
+def write_validation_report(con: duckdb.DuckDBPyConnection, path: Path, dedup_log: list[str] | None = None,
+                            statuses: list[tuple[str, str, str, str]] | None = None) -> None:
     """Contrôles croisés (montants publiés vs agrégation des tables) et couverture."""
     from budget_etat.queries import NET_FILTER
 
@@ -234,6 +250,7 @@ def write_validation_report(con: duckdb.DuckDBPyConnection, path: Path, dedup_lo
               "| table | exercice | mois / indicateur | source écartée | source gardée | écart |",
               "|---|---|---|---|---|---:|"]
     lines += (dedup_log or ["| – | | | aucun doublon | | |"]) + [""]
+    lines += _status_section(statuses or [])
     lines += ["## Couverture par exercice (exécution)", "",
               "Dépenses nettes = budget général hors remboursements et dégrèvements (programmes 200/201).", "",
               "Une année alimentée par plus d'une source de dépenses est signalée ⚠ (risque de double compte).", "",
@@ -268,27 +285,33 @@ def run(raw_dir: Path = RAW_DIR, db_path: Path = db.DB_PATH, parsers: list[Parse
     tmp.unlink(missing_ok=True)
     con = db.connect(tmp)
     pending, errors, done, skipped = [], [], 0, 0
+    statuses: list[tuple[str, str, str, str]] = []  # (fichier, parseur, statut, détail)
     try:
         for p in parsers:
             for f in sorted(raw_dir.glob(p.pattern)):
                 if f.name.startswith("_") or f.name.endswith(".part"):
                     continue
+                rel = str(f.relative_to(raw_dir))
                 try:
                     buf: dict[str, list[dict]] = {}
                     for table, row in p.fn(f):
                         buf.setdefault(table, []).append(row)
-                except Skip:
+                except Skip as e:
                     skipped += 1
+                    statuses.append((rel, p.name, "ignoré", str(e)))
                     continue
                 except (NotInspected, UnknownFormat) as e:
                     pending.append(f"{p.name} {f.parent.name}/{f.name} : {e}"[:400])
+                    statuses.append((rel, p.name, "à inspecter", str(e)[:400]))
                     continue
                 except Exception as e:
                     errors.append(f"{p.name} {f.name}: {type(e).__name__}: {e}")
+                    statuses.append((rel, p.name, "erreur", f"{type(e).__name__}: {e}"[:400]))
                     continue
                 for table, rows in buf.items():
                     _insert(con, table, rows)
-                rel = str(f.relative_to(raw_dir))
+                counts = ", ".join(f"{t}={len(r)}" for t, r in buf.items())
+                statuses.append((rel, p.name, "ingéré" if buf else "⚠ aucune ligne", counts))
                 m = by_path.get(rel, {})
                 con.execute("INSERT INTO source_file VALUES (?, ?, ?, ?, ?)",
                             [rel, m.get("url"), m.get("fetched_at"), m.get("sha256"), p.name])
@@ -298,7 +321,7 @@ def run(raw_dir: Path = RAW_DIR, db_path: Path = db.DB_PATH, parsers: list[Parse
         if matches:
             write_unmatched_report(matches, db_path.parent / NON_RAPPROCHES.name)
         dedup_log = deduplicate(con)
-        write_validation_report(con, db_path.parent / VALIDATION, dedup_log)
+        write_validation_report(con, db_path.parent / VALIDATION, dedup_log, statuses)
         con.close()
         tmp.replace(db_path)
     finally:

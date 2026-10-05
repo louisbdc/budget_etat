@@ -475,3 +475,19 @@ def test_destination_nature_plr2019_variant_with_nomenclature(tmp_path):
     assert got[(2020, "348", "3", "31")]["mission_lib"] == "TR"  # code gardé faute de libellé
     with pytest.raises(sources.Skip):  # le classeur de nomenclature n'est pas une source de montants
         list(sources.parse_plr_attachment(d / "plr2019_nomenclature_xls"))
+
+
+def test_smb_date_formats():
+    assert [sources._smb_date(h) for h in ("31_12_2024", "31/12/2013", "2013-12-31", "2013-12", "12/2013",
+                                            "2013-12-31 00:00:00", "niveau", "13_2024")] == \
+        [(2024, 12), (2013, 12), (2013, 12), (2013, 12), (2013, 12), (2013, 12), None, None]
+
+
+def test_validation_lists_file_status(tmp_path):
+    raw = tmp_path / "raw"
+    write(raw / "economie/plrg-2030/attachments/annexe1_etat_titre_cat_2030_csv", "foo;bar\n1;2\n")
+    write(raw / "economie/plrg-2030/attachments/bacea_bilan_2030_csv", "a;b\n1;2\n")
+    ingest.run(raw, tmp_path / "d.duckdb")
+    t = (tmp_path / "VALIDATION.md").read_text()
+    assert "## Statut des fichiers" in t and "| à inspecter | `economie/plrg-2030/attachments/annexe1_etat_titre_cat_2030_csv`" in t
+    assert "bacea_bilan" not in t  # les fichiers ignorés sont seulement comptés
