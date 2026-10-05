@@ -189,9 +189,9 @@ def deduplicate(con: duckdb.DuckDBPyConnection) -> list[str]:
 
 def _status_section(statuses: list[tuple[str, str, str, str]]) -> list[str]:
     """Statut de chaque fichier brut : ce qui n'est pas ingéré d'abord, avec la raison."""
-    order = {"erreur": 0, "à inspecter": 1, "⚠ aucune ligne": 2, "ingéré": 3, "ignoré": 4}
+    order = {"erreur": 0, "à inspecter": 1, "⚠ aucune ligne": 2, "ingéré ⚠": 3, "ingéré": 4, "ignoré": 5}
     out = ["## Statut des fichiers", "",
-           f"{sum(1 for s in statuses if s[2] == 'ingéré')} ingéré(s), "
+           f"{sum(1 for s in statuses if s[2].startswith('ingéré'))} ingéré(s), "
            f"{sum(1 for s in statuses if s[2] == 'ignoré')} ignoré(s) (doublons AE, comptes spéciaux, annexes non utilisées), "
            f"{sum(1 for s in statuses if s[2] in ('erreur', 'à inspecter', '⚠ aucune ligne'))} à regarder.", "",
            "| statut | fichier | parseur | détail |", "|---|---|---|---|"]
@@ -308,10 +308,12 @@ def run(raw_dir: Path = RAW_DIR, db_path: Path = db.DB_PATH, parsers: list[Parse
                     errors.append(f"{p.name} {f.name}: {type(e).__name__}: {e}")
                     statuses.append((rel, p.name, "erreur", f"{type(e).__name__}: {e}"[:400]))
                     continue
+                warnings = [w["message"] for w in buf.pop("avertissement", [])]
                 for table, rows in buf.items():
                     _insert(con, table, rows)
                 counts = ", ".join(f"{t}={len(r)}" for t, r in buf.items())
-                statuses.append((rel, p.name, "ingéré" if buf else "⚠ aucune ligne", counts))
+                status = "⚠ aucune ligne" if not buf else "ingéré ⚠" if warnings else "ingéré"
+                statuses.append((rel, p.name, status, "; ".join([counts] + warnings)))
                 m = by_path.get(rel, {})
                 con.execute("INSERT INTO source_file VALUES (?, ?, ?, ?, ?)",
                             [rel, m.get("url"), m.get("fetched_at"), m.get("sha256"), p.name])

@@ -529,3 +529,32 @@ def test_plrg_gross_recettes_and_empty_exports_are_skipped(tmp_path):
         write(path, vide)
         with pytest.raises(sources.Skip, match="pièces jointes"):
             list(fn(path))
+
+
+# --- 6e retour : UTF-16, cellule parasite « Expr2 » -----------------------------------------
+
+def test_smb_utf16(tmp_path):
+    head = "Niveau hiérarchique;Catégorie;Sous-catégorie;Ligne d’information;30/11/2013;31/12/2013\r\n"
+    rows = "\r\n".join(";".join(l.split(";")[0:1] + l.split(";")[2:]) for l in SMB_ROWS.strip().split("\n"))
+    p = tmp_path / "series_longues_smb_dgfip_2013_2023_csv"
+    p.write_bytes((head + rows).encode("utf-16"))  # avec BOM FF FE
+    assert sources.decode_bytes(p.read_bytes())[1] == "utf-16"
+    agg = {(r["indicateur"], r["mois"]): r["montant_meur"] for t, r in sources.parse_smb(p) if t == "agregat_etat"}
+    assert agg[("solde", 12)] == -160
+    q = tmp_path / "sans_bom"
+    q.write_bytes((head + rows).encode("utf-16-le"))
+    assert sources.decode_bytes(q.read_bytes())[1] == "utf-16"
+
+
+def test_plr_amount_garbage_is_skipped_and_reported(tmp_path):
+    d = tmp_path / "raw/economie/projet-de-loi-de-reglement-2020-plr-2020/attachments"
+    head = ["exercice", "loi", "typeBudget", "ministere", "mission", "programme", "action", "sous_action",
+            "categorie", "titre", "AE EXEC", "CP EXEC"]
+    ok = [[2020.0, "PLR", "BG", 7.0, "TR", 348.0, f"348-{i:02d}", None, 31.0, 3.0, 1.0, 1000000.0] for i in range(150)]
+    _xlsx(d / "plr2020_credits_destination_nature_xls",
+          [head] + ok + [[2020.0, "PLR", "BG", 7.0, "TR", 348.0, "348-99", None, 31.0, 3.0, "Expr1", "Expr2"]])
+    assert ingest.run(tmp_path / "raw", tmp_path / "b.duckdb") == 0
+    con = connect(tmp_path / "b.duckdb", read_only=True)
+    assert con.execute("SELECT sum(montant_meur) FROM depense").fetchone()[0] == 150
+    t = (tmp_path / "VALIDATION.md").read_text()
+    assert "| ingéré ⚠ |" in t and "Expr2" in t

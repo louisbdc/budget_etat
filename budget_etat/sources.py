@@ -51,6 +51,11 @@ class Skip(Exception):
 # --- utilitaires --------------------------------------------------------------
 
 def decode_bytes(data: bytes) -> tuple[str, str]:
+    # UTF-16 (fichiers SMB 2013-2023) : BOM FF FE / FE FF, ou à défaut beaucoup d'octets nuls.
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return data.decode("utf-16"), "utf-16"
+    if data[:200].count(b"\x00") > 40:
+        return data.decode("utf-16-le" if data[1:2] == b"\x00" else "utf-16-be"), "utf-16"
     for enc in ("utf-8-sig", "cp1252", "latin-1"):
         try:
             return data.decode(enc), enc
@@ -315,6 +320,7 @@ def parse_destination_nature(path: Path) -> Iterator[Row]:
         if ex is None and len(years) == 1:
             ex = years.pop()  # quelques lignes sans exercice dans un fichier mono-exercice
         agg: dict[tuple, float] = defaultdict(float)
+        bad: list[dict] = []
         for r in rows:
             code = _code(r[v["programme"]]).zfill(3)
             if not code.isdigit() or not _is_bg(r, code):
@@ -331,7 +337,16 @@ def parse_destination_nature(path: Path) -> Iterator[Row]:
             elif m in missions:
                 m = missions[m]
             key = (e, m, code, lib, _code(r[v["titre"]]), _code(r[v["categorie"]]))
-            agg[key] += meur(r[col]) or 0.0
+            val = try_float(r[col])
+            if val is None and str(r[col] or "").strip():
+                bad.append(r)  # texte parasite dans la colonne de montant (ex. « Expr2 »)
+                continue
+            agg[key] += (val or 0.0) / 1e6
+        if len(bad) > max(1, len(rows) // 100):
+            raise UnknownFormat(f"{len(bad)} montants non numériques sur {len(rows)} lignes, ex. {bad[0]}"[:400])
+        if bad:
+            yield "avertissement", {"message": f"{len(bad)} ligne(s) au montant non numérique ignorée(s), "
+                                               f"ex. {bad[0]}"[:300]}
         src = f"PLR {{e}} destination × nature ({path.parent.name})"
         for (e, m, code, lib, t, cat), val in agg.items():
             yield _dep(e, m, code, lib, t, val, src.format(e=e), categorie=cat)
