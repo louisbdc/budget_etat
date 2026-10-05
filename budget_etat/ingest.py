@@ -151,7 +151,7 @@ def run(raw_dir: Path = RAW_DIR, db_path: Path = db.DB_PATH, parsers: list[Parse
                 print(f"✓ {p.name} {rel} : " + ", ".join(f"{t}={len(r)}" for t, r in buf.items()))
         matches = reconcile_nomenclature(con)
         if matches:
-            write_unmatched_report(matches)
+            write_unmatched_report(matches, db_path.parent / NON_RAPPROCHES.name)
         con.close()
         tmp.replace(db_path)
     finally:

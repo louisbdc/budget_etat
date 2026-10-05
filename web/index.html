@@ -1,1 +1,116 @@
-<!doctype html><title>x</title>
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Budget de l'État</title>
+  <link rel="stylesheet" href="app.css">
+  <script src="vendor/echarts.min.js"></script>
+</head>
+<body>
+<header>
+  <h1>Budget de l'État</h1>
+  <nav id="tabs">
+    <button data-tab="evolution" class="active">Évolution</button>
+    <button data-tab="sankey">Flux</button>
+    <button data-tab="detail">Détail</button>
+    <button data-tab="simulateur">Simulateur</button>
+    <button data-tab="donnees">Données</button>
+  </nav>
+</header>
+<div id="banner" hidden></div>
+
+<main>
+  <section id="evolution" class="tab active">
+    <div class="toolbar">
+      <label>Unité <select id="evo-unit"><option value="eur">Md€</option><option value="pib">% du PIB</option></select></label>
+    </div>
+    <h2>État — budget général <span class="perimetre">périmètre : État (DGFiP)</span></h2>
+    <div class="grid">
+      <figure><figcaption>Recettes nettes et dépenses</figcaption><div class="chart" id="c-recdep"></div></figure>
+      <figure><figcaption>Solde d'exécution</figcaption><div class="chart" id="c-solde"></div></figure>
+      <figure><figcaption>Dette financière de l'État</figcaption><div class="chart" id="c-dette"></div></figure>
+      <figure><figcaption>Charge de la dette</figcaption><div class="chart" id="c-charge"></div></figure>
+    </div>
+    <h2>Administrations publiques — Maastricht <span class="perimetre">périmètre : APU (État + Sécu + collectivités), Eurostat</span></h2>
+    <p class="note">Affiché à titre de contexte uniquement : n'entre dans aucun calcul du simulateur.</p>
+    <div class="grid">
+      <figure><figcaption>Dette publique (Maastricht)</figcaption><div class="chart" id="c-apu-dette"></div></figure>
+      <figure><figcaption>Solde public (Maastricht)</figcaption><div class="chart" id="c-apu-solde"></div></figure>
+    </div>
+  </section>
+
+  <section id="sankey" class="tab">
+    <div class="toolbar"><label>Exercice <select id="sk-year"></select></label></div>
+    <h2>Recettes → budget général → missions → programmes <span class="perimetre">périmètre : État (DGFiP), exécution</span></h2>
+    <div class="chart tall" id="c-sankey"></div>
+    <p class="note">Les postes marqués ⚠ sont peu pilotables à court terme.</p>
+  </section>
+
+  <section id="detail" class="tab">
+    <div class="toolbar">
+      <label>Exercice <select id="dd-year"></select></label>
+      <nav id="dd-crumbs" class="crumbs"></nav>
+    </div>
+    <h2 id="dd-title">Dépenses par mission <span class="perimetre">périmètre : État (DGFiP)</span></h2>
+    <div class="chart" id="c-drill"></div>
+    <table id="dd-table" class="data"></table>
+  </section>
+
+  <section id="simulateur" class="tab">
+    <div class="sim-layout">
+      <aside>
+        <h3>Année de base <span class="perimetre">État</span></h3>
+        <div id="sim-base" class="form"></div>
+        <h3>Hypothèses</h3>
+        <div class="form" id="sim-hyp">
+          <label>Horizon (années) <input type="number" id="h-horizon" value="10" min="5" max="15"></label>
+          <label>Croissance nominale du PIB (%/an) <input type="number" step="0.1" id="h-g" value="2.5"></label>
+          <label>Taux de marché des nouvelles émissions (%) <input type="number" step="0.1" id="h-r" value="3.0"></label>
+          <label>Part du stock refinancée par an (%) <input type="number" step="1" id="h-rho" value="12"></label>
+          <label>Tendance des dépenses sans réforme (%/an) <input type="number" step="0.1" id="h-s" value="2.0"></label>
+          <label>Élasticité des recettes au PIB <input type="number" step="0.1" id="h-eps" value="1.0"></label>
+          <label>Autres flux de dette (M€/an) <input type="number" step="100" id="h-other" value="0"></label>
+          <label class="check"><input type="checkbox" id="h-mult"> Multiplicateur budgétaire</label>
+          <label>… sur les dépenses <input type="number" step="0.1" id="h-md" value="0.5"></label>
+          <label>… sur les recettes <input type="number" step="0.1" id="h-mr" value="0.3"></label>
+        </div>
+        <p class="note">Valeurs par défaut indicatives, à ajuster : aucune n'est tirée des données.</p>
+      </aside>
+      <div>
+        <h3>Mesures</h3>
+        <table id="sim-measures" class="data"></table>
+        <div class="toolbar">
+          <button id="m-add">+ Mesure</button>
+          <button id="sim-run" class="primary">Simuler</button>
+          <span class="spacer"></span>
+          <input id="sc-name" placeholder="Nom du scénario">
+          <button id="sc-save">Enregistrer</button>
+          <select id="sc-list"><option value="">Charger…</option></select>
+          <button id="sc-del">Supprimer</button>
+        </div>
+        <div class="toolbar">
+          <label>Comparer avec : <select id="sc-compare" multiple size="3"></select></label>
+        </div>
+        <div id="sim-error" class="error" hidden></div>
+        <div class="grid">
+          <figure><figcaption>Déficit de l'État (M€) <span class="perimetre">État</span></figcaption><div class="chart" id="s-deficit"></div></figure>
+          <figure><figcaption>Dette de l'État (M€) <span class="perimetre">État</span></figcaption><div class="chart" id="s-dette"></div></figure>
+          <figure><figcaption>Dette de l'État / PIB (%) <span class="perimetre">État</span></figcaption><div class="chart" id="s-ratio"></div></figure>
+          <figure><figcaption>Charge d'intérêts (M€) <span class="perimetre">État</span></figcaption><div class="chart" id="s-interet"></div></figure>
+        </div>
+        <table id="sim-table" class="data"></table>
+      </div>
+    </div>
+  </section>
+
+  <section id="donnees" class="tab">
+    <h2>État de la base</h2>
+    <div id="st-summary"></div>
+    <h3>Fichiers sources ingérés</h3>
+    <table id="st-sources" class="data"></table>
+  </section>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
