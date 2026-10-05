@@ -80,7 +80,7 @@ Schéma canonique (`db.py`) : `depense` (exercice, mois, periode, nature, missio
 
 **Vérifications faites sur les données réelles** (`VALIDATION.md`) :
 - 501 contrôles programme par programme exacts au centime ;
-- 2024 : détail PLRG = SMB pour les dépenses nettes (443 413 M€) et pour les recettes fiscales (325 679 M€) ;
+- 2024 : total fiscal PLRG = SMB (325 679 M€). Dépenses nettes : 438 458 M€ (ancienne vue nette) + 4 955 M€ (P201 selon la SMB) = 443 413 M€ = SMB, calcul à confirmer par le rapprochement automatique de `VALIDATION.md` ;
 - solde SMB 2024 = recettes nettes + fonds de concours − dépenses nettes − prélèvements + soldes des comptes spéciaux et budgets annexes, au centime.
 
 `data/raw/manifest.json` trace chaque fichier (URL, date UTC, sha256). Le statut de chaque fichier est affiché : ingéré, ignoré, à inspecter (format inconnu, avec ses en-têtes) ou en erreur. **Aucun chiffre n'est codé en dur, et un format inconnu n'est jamais deviné.**
