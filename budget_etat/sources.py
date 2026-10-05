@@ -165,8 +165,19 @@ def perimetre_programme(code: str | None) -> str:
 def _norm_header(h: str) -> str:
     import unicodedata
 
+    # Apostrophe typographique (’) : séparateur comme « ' », sinon « d’information » -> « dinformation ».
+    h = h.replace("\u2019", "'").replace("\u02bc", "'")
     h = unicodedata.normalize("NFKD", h).encode("ascii", "ignore").decode().lower()
     return re.sub(r"[^a-z0-9]+", "_", h).strip("_")
+
+
+ODS_VIDE = {"recordid", "record_timestamp", "resource_id"}
+
+
+def skip_if_empty_ods_export(headers: list[str], n_rows: int) -> None:
+    """Export ODS d'un jeu sans enregistrements (données en pièces jointes seulement)."""
+    if ODS_VIDE <= {_norm_header(h) for h in headers} and n_rows == 0:
+        raise Skip("export vide : le jeu ne publie que des pièces jointes")
 
 
 def _dep(exercice, mission, code, lib, titre, montant, source, categorie=None, nature="execution") -> Row:
@@ -201,6 +212,7 @@ def parse_exec_titres(path: Path) -> Iterator[Row]:
     else:
         hdr = 0
     headers, rows = grid_rows(grid, hdr)
+    skip_if_empty_ods_export(grid[hdr], len(rows))
     h = set(headers)
     pick = lambda key: next((a for a in EXEC_ALIASES[key] if a in h), None)
     prog, lib, mission = pick("programme"), pick("programme_lib"), pick("mission")
@@ -299,6 +311,9 @@ def parse_destination_nature(path: Path) -> Iterator[Row]:
                 raise UnknownFormat(f"pas de colonne exec_cp_AAAA : {grid[hdr]}")
             col, ex = found
         missions, programmes = load_nomenclature(path.parent) if "cp" in v else ({}, {})
+        years = {int(_code(r.get(v["exercice"]))) for r in rows if _code(r.get(v["exercice"])).isdigit()}
+        if ex is None and len(years) == 1:
+            ex = years.pop()  # quelques lignes sans exercice dans un fichier mono-exercice
         agg: dict[tuple, float] = defaultdict(float)
         for r in rows:
             code = _code(r[v["programme"]]).zfill(3)
@@ -307,7 +322,7 @@ def parse_destination_nature(path: Path) -> Iterator[Row]:
             e = _code(r.get(v["exercice"]))
             e = int(e) if e.isdigit() else ex
             if e is None:
-                raise UnknownFormat("exercice introuvable")
+                raise UnknownFormat(f"exercice introuvable (exercices présents : {sorted(years)})")
             m = r.get("mission")
             lib = r.get("programme") if v["programme"] == "code_programme" else None
             if code in programmes:
@@ -328,6 +343,7 @@ def parse_plr_export(path: Path) -> Iterator[Row]:
     """Exports CSV des jeux « projet de loi de règlement » : trois variantes."""
     (_, grid), = read_sheets(path)[:1]
     headers = [_norm_header(c) for c in grid[0]] if grid else []
+    skip_if_empty_ods_export(grid[0] if grid else [], sum(1 for r in grid[1:] if any(r)))
     if {"code_programme", "code_titre", "code_categorie"} <= set(headers):
         yield from parse_destination_nature(path)
     elif any(re.fullmatch(r"exec_cp_t2_hors_t2_\d{4}.*", h) for h in headers):
@@ -401,6 +417,10 @@ def parse_plrg_recettes(path: Path) -> Iterator[Row]:
     de contrôle."""
     headers, rows = read_rows(path)
     col = next((x for x in headers if x.startswith("Total des recettes")), None)
+    norm = {_norm_header(h) for h in headers}
+    if not col and norm & {"total_recouvrement", "total_des_recouvrements"}:
+        # PLRG 2023 / 2025 : recouvrements bruts par ligne d'exécution, sans totaux nets.
+        raise Skip("recouvrements bruts sans totaux nets : recettes de l'exercice prises dans la SMB")
     if not col or not {"Catégorie", "Section"} <= set(headers):
         raise UnknownFormat(f"en-têtes {headers}")
     ex = year_from_path(path)
@@ -577,7 +597,8 @@ def parse_smb(path: Path) -> Iterator[Row]:
                                           categorie=cat, sens="net", poste_code=code, poste_lib=lib,
                                           montant_meur=v, source=src)
         return
-    raise UnknownFormat("pas de colonne « ligne d'information »")
+    first = read_sheets(path)[0][1][:2] if read_sheets(path) else []
+    raise UnknownFormat(f"pas de colonne « ligne d'information » ; premières lignes : {first}"[:400])
 
 
 # --- PLF / LFI -----------------------------------------------------------------

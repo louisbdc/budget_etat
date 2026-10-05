@@ -491,3 +491,41 @@ def test_validation_lists_file_status(tmp_path):
     t = (tmp_path / "VALIDATION.md").read_text()
     assert "## Statut des fichiers" in t and "| à inspecter | `economie/plrg-2030/attachments/annexe1_etat_titre_cat_2030_csv`" in t
     assert "bacea_bilan" not in t  # les fichiers ignorés sont seulement comptés
+
+
+# --- 5e retour : apostrophe typographique, exercice manquant, formats ignorés ------------------
+
+def test_smb_typographic_apostrophe_header(tmp_path):
+    head = "Niveau hiérarchique;Catégorie;Sous-catégorie;Ligne d’information;30/11/2013;31/12/2013\n"
+    rows = "\n".join(";".join(l.split(";")[0:1] + l.split(";")[2:]) for l in SMB_ROWS.strip().split("\n")) + "\n"
+    p = tmp_path / "series_longues_smb_dgfip_2013_2023_csv"
+    p.write_bytes((head + rows).replace("\n", "\r").encode("cp1252"))
+    agg = {(r["indicateur"], r["exercice"], r["mois"]): r["montant_meur"]
+           for t, r in sources.parse_smb(p) if t == "agregat_etat"}
+    assert agg[("solde", 2013, 12)] == -160 and agg[("depenses_nettes", 2013, 11)] == 9
+
+
+def test_plr2020_rows_without_exercice(tmp_path):
+    d = tmp_path / "economie/projet-de-loi-de-reglement-2020-plr-2020/attachments"
+    _xlsx(d / "plr2020_credits_destination_nature_xls", [
+        ["exercice", "loi", "typeBudget", "ministere", "mission", "programme", "action", "sous_action",
+         "categorie", "titre", "AE EXEC", "CP EXEC"],
+        [2020.0, "PLR", "BG", 7.0, "TR", 348.0, "348-11", None, 31.0, 3.0, 1.0, 500000.0],
+        [None, "PLR", "BG", 7.0, "TR", 348.0, "348-12", None, 31.0, 3.0, 1.0, 250000.0],
+    ])
+    rows = [r for _, r in sources.parse_plr_attachment(d / "plr2020_credits_destination_nature_xls")]
+    assert [(r["exercice"], r["montant_meur"]) for r in rows] == [(2020, 0.75)]
+
+
+def test_plrg_gross_recettes_and_empty_exports_are_skipped(tmp_path):
+    p = write(tmp_path / "plrg-2023/attachments/annexe1_etat_recettes_2023_csv",
+              "Categorie;Section;Ligne_prevision;Ligne_d'execution;LFI;LFR;Total_prevision;Total_recouvrement\n"
+              "Recettes fiscales;11 - IR;1101 - IR;110101 - x;0;0;0;12\n")
+    with pytest.raises(sources.Skip, match="SMB"):
+        list(sources.parse_plr_attachment(p))
+    vide = "recordid;_record_id;record_timestamp;_record_timestamp;record_size;_record_size;resource_id;_resource_id\n"
+    for path, fn in [(tmp_path / "projet-de-loi-de-reglement-2020-plr-2020/export.csv", sources.parse_plr_export),
+                     (tmp_path / "execution-2013-du-budget-de-letat-en-cp-et-ae-/export.csv", sources.parse_exec_titres)]:
+        write(path, vide)
+        with pytest.raises(sources.Skip, match="pièces jointes"):
+            list(fn(path))
