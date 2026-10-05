@@ -187,6 +187,51 @@ def deduplicate(con: duckdb.DuckDBPyConnection) -> list[str]:
     return log
 
 
+def _diagnostic_suspects(con: duckdb.DuckDBPyConnection, net_filter: str) -> list[str]:
+    """Pour chaque exercice dont le détail s'écarte de plus de 0,5 % de la SMB :
+    comparaison par titre (la SMB publie les titres 1 à 7) et programmes dont le
+    montant change le plus par rapport à l'exercice précédent disponible."""
+    suspects = [r[0] for r in con.execute(f"""
+        SELECT a.exercice FROM agregat_etat a JOIN (
+            SELECT exercice, sum(montant_meur) v FROM depense WHERE nature = 'execution' AND {net_filter} GROUP BY 1
+        ) d USING (exercice)
+        WHERE a.indicateur = 'depenses_nettes' AND a.mois = 12 AND abs(d.v - a.montant_meur) > 0.005 * abs(a.montant_meur)
+        ORDER BY 1""").fetchall()]
+    out: list[str] = []
+    for ex in suspects:
+        out += ["", f"### Diagnostic {ex} (détail ≠ SMB)", "", "Par titre (détail net − SMB, M€) :", "",
+                "| titre | SMB | détail | écart | ratio |", "|---|---:|---:|---:|---:|"]
+        for t, smb, det in con.execute(f"""
+                WITH d AS (SELECT titre_code t, sum(montant_meur) v FROM depense
+                           WHERE nature = 'execution' AND exercice = ? AND {net_filter} GROUP BY 1),
+                a AS (SELECT CASE indicateur WHEN 'charge_dette' THEN '4' ELSE right(indicateur, 1) END t,
+                             montant_meur v FROM agregat_etat WHERE exercice = ? AND mois = 12
+                             AND (indicateur LIKE 'depenses_titre_%' OR indicateur = 'charge_dette'))
+                SELECT coalesce(d.t, a.t), a.v, d.v FROM d FULL JOIN a USING (t) ORDER BY 1""", [ex, ex]).fetchall():
+            ratio = f"{det / smb:.2f}" if smb and det is not None else "–"
+            ecart = f"{(det or 0) - (smb or 0):,.0f}"
+            out.append(f"| {t} | {'–' if smb is None else f'{smb:,.0f}'} | {'–' if det is None else f'{det:,.0f}'} "
+                       f"| {ecart} | {ratio} |")
+        prev = con.execute("SELECT max(exercice) FROM depense WHERE nature = 'execution' AND exercice < ?",
+                           [ex]).fetchone()[0]
+        ref = prev if prev is not None else "–"
+        out += ["", f"Programmes qui changent le plus par rapport à {ref} (M€) :", "",
+                f"| programme | {ref} | {ex} | écart | ratio | lignes {ex} |", "|---|---:|---:|---:|---:|---:|"]
+        for code, lib, a, b, n in con.execute(f"""
+                WITH c AS (SELECT programme_code, any_value(programme_lib) lib,
+                                  sum(montant_meur) FILTER (WHERE exercice = ?) a,
+                                  sum(montant_meur) FILTER (WHERE exercice = ?) b,
+                                  count(*) FILTER (WHERE exercice = ?) n
+                           FROM depense WHERE nature = 'execution' AND exercice IN (?, ?) AND {net_filter}
+                           GROUP BY 1)
+                SELECT * FROM c ORDER BY abs(coalesce(b, 0) - coalesce(a, 0)) DESC LIMIT 15""",
+                [prev, ex, ex, prev, ex]).fetchall():
+            ratio = f"{b / a:.2f}" if a and b is not None else "–"
+            out.append(f"| {code} {(lib or '')[:50]} | {(a or 0):,.0f} | {(b or 0):,.0f} | {(b or 0) - (a or 0):,.0f} "
+                       f"| {ratio} | {n} |")
+    return out
+
+
 def _status_section(statuses: list[tuple[str, str, str, str]]) -> list[str]:
     """Statut de chaque fichier brut : ce qui n'est pas ingéré d'abord, avec la raison."""
     order = {"erreur": 0, "à inspecter": 1, "⚠ aucune ligne": 2, "ingéré ⚠": 3, "ingéré": 4, "ignoré": 5}
@@ -247,6 +292,7 @@ def write_validation_report(con: duckdb.DuckDBPyConnection, path: Path, dedup_lo
             ORDER BY 1, 2""").fetchall():
         alerte = " ⚠" if smb and abs(det - smb) > 0.005 * abs(smb) else ""
         lines.append(f"| {ex}{alerte} | {nom} | {smb:,.0f} | {det:,.0f} | {det - smb:,.1f} |")
+    lines += _diagnostic_suspects(con, NET_FILTER)
     lines += ["", "## Sources écartées (doublons)", "",
               "Quand plusieurs sources couvrent la même clé, seule la plus prioritaire est gardée "
               "(SMB/INSEE/Eurostat > PLRG > PLR > exécution data.economie > PLF).", "",

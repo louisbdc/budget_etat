@@ -571,3 +571,18 @@ def test_destination_nature_keeps_only_plr_rows(tmp_path):
     con = connect(tmp_path / "b.duckdb", read_only=True)
     assert con.execute("SELECT sum(montant_meur) FROM depense").fetchone()[0] == 1.0
     assert "lignes des lois ['LFI', 'LFR'] écartées" in (tmp_path / "VALIDATION.md").read_text()
+
+
+def test_diagnostic_for_suspect_year(tmp_path):
+    raw = tmp_path / "raw"
+    d = raw / "economie/situations-mensuelles-budgetaires-series-longues"
+    write(d / "export.csv", SMB_HEAD.format(y=2024) + SMB_ROWS, "utf-8-sig")  # SMB : dépenses nettes 10, T4 1,5
+    a = raw / "economie/plrg-2024/attachments"
+    write(a / "annexe1_etat_titre_cat_2024_csv", "Mission;Programme;Titre;Categorie;Depenses\n"
+          "Mission A;Programme A1 - 101;Titre 6;61;30000000\n"  # gonflé
+          "Engagements financiers de l'État;Charge - 117;Titre 4;41;1500000\n")
+    ingest.run(raw, tmp_path / "b.duckdb")
+    t = (tmp_path / "VALIDATION.md").read_text()
+    assert "| 2024 ⚠ | dépenses nettes |" in t and "### Diagnostic 2024" in t
+    assert "| 4 | 2 | 2 | 0 | 1.00 |" in t  # titre 4 exact (1,5 M€ arrondi)
+    assert "| 101 Programme A1 |" in t
