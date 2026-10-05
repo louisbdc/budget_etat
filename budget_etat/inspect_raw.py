@@ -3,16 +3,22 @@
 Sert à écrire les parseurs d'`ingest.py` à partir des schémas RÉELS : pour
 chaque fichier tabulaire on liste les colonnes, types détectés, taux de vide,
 cardinalité, min/max, valeurs les plus fréquentes et quelques lignes d'exemple.
+Cas particuliers : archives zip (contenu profilé), catalogue data.economie
+(liste id/titre), JSON-stat Eurostat (codes de dimensions), SDMX INSEE (séries).
 """
 
 from __future__ import annotations
 
+import io
 import json
+import tempfile
+import zipfile
 from pathlib import Path
 
 import duckdb
 
 from budget_etat.fetch import RAW_DIR, ROOT
+from budget_etat.sources import decode_bytes
 
 REPORT = ROOT / "data" / "INSPECTION.md"
 LOW_CARD = 60
@@ -23,20 +29,14 @@ def _q(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
-def _open_csv(con: duckdb.DuckDBPyConnection, path: Path) -> str:
-    """Crée une vue `t` sur le CSV ; essaie UTF-8 puis latin-1. Retourne l'encodage."""
-    last = None
-    for enc in ("utf-8", "latin-1"):
-        try:
-            con.execute(
-                f"CREATE OR REPLACE VIEW t AS SELECT * FROM read_csv('{str(path).replace(chr(39), chr(39) * 2)}', "
-                f"encoding='{enc}', sample_size=-1, null_padding=true)"
-            )
-            con.execute("SELECT count(*) FROM t").fetchone()
-            return enc
-        except duckdb.Error as e:  # encodage ou dialecte non reconnu
-            last = e
-    raise last  # type: ignore[misc]
+def _open_csv(con: duckdb.DuckDBPyConnection, data: bytes, tmpdir: Path) -> str:
+    """Décode en Python (utf-8 / cp1252 / latin-1), réécrit en UTF-8, crée la vue `t`."""
+    text, enc = decode_bytes(data)
+    tmp = tmpdir / "f.csv"
+    tmp.write_text(text, encoding="utf-8")
+    con.execute(f"CREATE OR REPLACE VIEW t AS SELECT * FROM read_csv('{tmp}', sample_size=-1, null_padding=true)")
+    con.execute("SELECT count(*) FROM t").fetchone()
+    return enc
 
 
 def profile_table(con: duckdb.DuckDBPyConnection) -> list[str]:
@@ -62,8 +62,9 @@ def profile_table(con: duckdb.DuckDBPyConnection) -> list[str]:
         ).fetchall()
         vals = ", ".join(f"`{v}` ({k})" for v, k in rows)
         out.append(f"\n- **`{name}`** : {vals}")
-    sample = con.execute("SELECT * FROM t LIMIT 5").fetchall()
-    out.append("\nExemple (5 premières lignes) :\n```")
+    limit = n if n <= 60 else 12  # petit fichier : on montre tout
+    sample = con.execute(f"SELECT * FROM t LIMIT {limit}").fetchall()
+    out.append(f"\nExemple ({limit} premières lignes) :\n```")
     out.append(" ; ".join(c[0] for c in cols))
     for r in sample:
         out.append(" ; ".join("" if v is None else str(v) for v in r))
@@ -71,9 +72,7 @@ def profile_table(con: duckdb.DuckDBPyConnection) -> list[str]:
     return out
 
 
-def describe_json(path: Path) -> list[str]:
-    data = json.loads(path.read_text(encoding="utf-8"))
-
+def describe_json(data) -> list[str]:
     def shape(x, depth=0):
         if depth > 3:
             return "…"
@@ -86,31 +85,93 @@ def describe_json(path: Path) -> list[str]:
     return ["```", shape(data)[:4000], "```"]
 
 
+def describe_jsonstat(ds: dict) -> list[str]:
+    out = [f"JSON-stat : {ds.get('label')} — mis à jour {ds.get('updated')}", ""]
+    for d in ds["id"]:
+        cat = ds["dimension"][d]["category"]
+        labels = cat.get("label", {})
+        idx = cat["index"]
+        codes = idx if isinstance(idx, list) else sorted(idx, key=idx.get)
+        if d == "time":
+            out.append(f"- `time` : {codes[0]} → {codes[-1]} ({len(codes)} périodes)")
+        else:
+            out.append(f"- `{d}` : " + ", ".join(f"`{c}` ({labels.get(c, '')})" for c in codes[:40]))
+    return out
+
+
+def describe_catalog(cat: list[dict]) -> list[str]:
+    out = [f"{len(cat)} jeux au catalogue", "", "| id | titre |", "|---|---|"]
+    out += [f"| `{d['id']}` | {(d.get('title') or '').replace('|', '/')} |" for d in sorted(cat, key=lambda d: d["id"])]
+    return out
+
+
+def describe_sdmx(data: bytes) -> list[str]:
+    from budget_etat.sources import parse_sdmx
+
+    out = []
+    for s in parse_sdmx(data):
+        obs = s["obs"]
+        attrs = {k: v for k, v in s["attrs"].items() if k not in ("TITLE_EN",)}
+        out.append(f"- **{attrs.get('IDBANK')}** : {attrs.get('TITLE_FR')}")
+        out.append(f"  - attributs : {json.dumps(attrs, ensure_ascii=False)[:600]}")
+        if obs:
+            out.append(f"  - {len(obs)} obs., {obs[0]['TIME_PERIOD']} → {obs[-1]['TIME_PERIOD']} ; "
+                       f"exemple : {json.dumps(obs[-1], ensure_ascii=False)}")
+    return out or ["(aucune série SDMX trouvée)"]
+
+
+def _profile_bytes(con, name: str, data: bytes, tmpdir: Path) -> list[str]:
+    suffix = Path(name).suffix.lower()
+    head = data.lstrip()[:1]
+    if zipfile.is_zipfile(io.BytesIO(data)):
+        out = []
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            for info in z.infolist():
+                out.append(f"\n### (zip) `{info.filename}` — {info.file_size} octets\n")
+                if info.is_dir():
+                    continue
+                inner = z.read(info)
+                if Path(info.filename).suffix.lower() in (".txt", ".md"):
+                    out += ["```", decode_bytes(inner)[0][:3000], "```"]
+                else:
+                    out += _profile_bytes(con, info.filename, inner, tmpdir)
+        return out
+    if head == b"<":
+        return describe_sdmx(data)
+    if suffix == ".json" or head in (b"{", b"["):
+        obj = json.loads(decode_bytes(data)[0])
+        if isinstance(obj, dict) and "dimension" in obj and "id" in obj:
+            return describe_jsonstat(obj)
+        if name.endswith("_catalog_all.json"):
+            return describe_catalog(obj)
+        return describe_json(obj)
+    if suffix in (".pdf", ".xlsx", ".xls", ".docx", ".odt", ".ods"):
+        return [f"(format {suffix} non profilé)"]
+    enc = _open_csv(con, data, tmpdir)
+    return [f"encodage : {enc}"] + profile_table(con)
+
+
 def run(raw_dir: Path = RAW_DIR, report: Path = REPORT) -> int:
     files = sorted(p for p in raw_dir.rglob("*") if p.is_file() and not p.name.endswith(".part")
-                   and p.name != "manifest.json")
+                   and p.name != "manifest.json" and not p.name.startswith("_famille"))
     if not files:
         print(f"Aucun fichier dans {raw_dir} : lancer d'abord `budget fetch`.")
         return 1
     lines = ["# Inspection des fichiers bruts", "",
              "Généré par `budget inspect`. À partager pour écrire les parseurs d'ingestion.", ""]
     con = duckdb.connect()
-    for p in files:
-        rel = p.relative_to(raw_dir)
-        lines += [f"## `{rel}`", f"{p.stat().st_size} octets", ""]
-        suffix = p.suffix.lower()
-        try:
-            if suffix in (".csv", ".txt") or (suffix == "" and p.read_bytes()[:1] not in (b"{", b"[")):
-                enc = _open_csv(con, p)
-                lines.append(f"encodage : {enc}")
-                lines += profile_table(con)
-            elif suffix == ".json" or p.read_bytes()[:1] in (b"{", b"["):
-                lines += describe_json(p)
-            else:
-                lines.append(f"(format {suffix or 'inconnu'} non profilé)")
-        except Exception as e:  # on documente l'échec plutôt que d'interrompre
-            lines.append(f"⚠ échec du profilage : {type(e).__name__}: {e}")
-        lines.append("")
+    with tempfile.TemporaryDirectory() as td:
+        for p in files:
+            rel = p.relative_to(raw_dir)
+            if p.name in ("_dataset.json", "_attachments.json") or p.name.startswith("_catalog_") and \
+                    p.name != "_catalog_all.json":
+                continue  # métadonnées volumineuses sans intérêt pour les parseurs
+            lines += [f"## `{rel}`", f"{p.stat().st_size} octets", ""]
+            try:
+                lines += _profile_bytes(con, p.name, p.read_bytes(), Path(td))
+            except Exception as e:  # on documente l'échec plutôt que d'interrompre
+                lines.append(f"⚠ échec du profilage : {type(e).__name__}: {str(e)[:500]}")
+            lines.append("")
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text("\n".join(lines), encoding="utf-8")
     print(f"Rapport écrit : {report}")

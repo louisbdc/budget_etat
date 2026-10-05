@@ -188,7 +188,7 @@ function renderBaseForm() {
   const rv = BASE.revenue.reduce((s, l) => s + l.amount, 0);
   $("#sim-base").replaceChildren(
     el("label", {}, "Exercice", el("strong", {}, BASE.exercice ?? "–")),
-    f("gdp", "PIB nominal (M€)"), f("debt", "Dette de l'État fin d'année (M€)"), f("interest", "Charge d'intérêts (M€)"),
+    f("gdp", "PIB nominal (M€)"), f("debt", "Dette négociable de l'État fin d'année (M€)"), f("interest", "Charge d'intérêts (M€)"),
     el("label", {}, "Dépenses hors intérêts (M€)", el("span", {}, fmt(sp, 0))),
     el("label", {}, "Recettes nettes (M€)", el("span", {}, fmt(rv, 0))),
     BASE.missing.length ? el("p", { class: "error" }, `Manquant en base : ${BASE.missing.join(", ")}.` +

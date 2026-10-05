@@ -2,7 +2,7 @@
 
 Outil perso pour explorer le budget de l'État français et simuler des scénarios « et si » (solde, dette, charge d'intérêts).
 
-> **État d'avancement.** Tout est en place sauf les **parseurs des fichiers DGFiP / data.economie** : le téléchargement avec cache, l'inspection des fichiers, la base canonique, le rapprochement de nomenclature, l'API, le front (évolution, Sankey, drill-down) et le simulateur. Les parseurs n'ont pas pu être écrits parce que l'environnement de développement n'avait **aucun accès** aux domaines sources (voir « Données »), et aucun schéma n'a été supposé. Pour débloquer : lancer `budget fetch` puis `budget inspect` sur une machine connectée, et partager `data/INSPECTION.md`.
+> **État d'avancement.** Les parseurs sont écrits d'après une première inspection des fichiers réels (`data/INSPECTION.md`, octobre 2026). Ils couvrent l'exécution 2010–2012 et 2024. Il manque encore 2015–2023, la dette de l'État et les recettes 2010–2014 : une deuxième passe `budget fetch` + `budget inspect` est nécessaire (voir « Ce qui reste à faire »).
 
 ## Lancer
 
@@ -30,7 +30,8 @@ Sans base, l'interface s'ouvre quand même : les graphiques indiquent « pas de 
 budget_etat/
   fetch.py        sources -> data/raw/ + manifest (URL, date UTC, sha256), sans retéléchargement inutile
   inspect_raw.py  profil des fichiers bruts : colonnes, types, vides, cardinalité, valeurs fréquentes
-  ingest.py       parseurs -> base canonique, puis rapprochement de nomenclature
+  sources.py      parseurs (formats reconnus par les en-têtes)
+  ingest.py       orchestration -> base canonique, nomenclature, VALIDATION.md
   db.py           schéma canonique DuckDB (M€ courants)
   nomenclature.py rapprochement mission/programme entre exercices
   jsonstat.py     décodeur JSON-stat 2.0 (Eurostat)
@@ -46,25 +47,47 @@ Schéma canonique (`db.py`) : `depense` (exercice, mois, periode, nature, missio
 
 ## Données
 
-| Source | URL | Usage prévu | Statut |
-|---|---|---|---|
-| DGFiP – Situation mensuelle de l'État | https://www.data.gouv.fr/datasets/dgfip-situation-mensuelle-de-letat (API `/api/1/datasets/dgfip-situation-mensuelle-de-letat/`) | solde, dépenses par titre / mission / programme, recettes, dette de l'État | **non inspecté** (403 depuis l'environnement de dev) |
-| Même jeu, miroir data.economie | https://data.economie.gouv.fr/explore/dataset/situation-mensuelle-de-l-etat/ | idem, export CSV complet | **non inspecté** |
-| PLRG 2024 (résultats et gestion) | https://data.economie.gouv.fr/explore/dataset/plrg-2024/ (pièces jointes, dont `annexe1_etat_recettes_csv`) | exécution annuelle, recettes par impôt | **non inspecté** |
-| Autres jeux data.economie | recherche au catalogue (`ODS_QUERIES` dans `fetch.py`) ; les jeux `plr*`, `execution-*` et `*recettes*` sont aussi téléchargés | historique pluriannuel | **non inspecté** |
-| Eurostat `gov_10dd_edpt1` | https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/gov_10dd_edpt1 | dette et solde APU (Maastricht) | parseur écrit (format JSON-stat standard) ; codes `MIO_EUR` / `S13` / `GD` / `B9` à confirmer |
-| Eurostat `nama_10_gdp` | même API, `na_item=B1GQ&unit=CP_MEUR` | PIB nominal | idem, codes `B1GQ` / `CP_MEUR` à confirmer |
-| INSEE (comptes des APU) | https://www.insee.fr | alternative à Eurostat | non utilisé pour l'instant |
+### Ce que la 1re inspection a montré
 
-Les identifiants des jeux data.economie ont été trouvés par recherche web (les pages elles-mêmes étaient inaccessibles). `fetch` signale ceux qui renvoient une erreur, sans s'interrompre. Chaque fichier est tracé dans `data/raw/manifest.json` : URL effective, date de récupération (UTC), taille, sha256. Ces informations apparaissent aussi dans l'onglet « Données ».
+| Source | Contenu réel | Utilisé |
+|---|---|---|
+| [data.gouv.fr – SME DGFiP](https://www.data.gouv.fr/datasets/dgfip-situation-mensuelle-de-letat) et son miroir data.economie `situation-mensuelle-de-l-etat` | **index de 212 PDF** (2010 → 2026), aucune donnée tabulaire | non (PDF) |
+| data.economie `execution-2010-du-budget-general-en-cp` | exécution CP par programme × action × titre (t1…t7), en €, **nomenclature ministère** (sans mission) | oui ; mission déduite par correspondance |
+| `execution-2011-du-budget-general-en-cp` | idem, nomenclature mission | oui |
+| `execution-2012-…-en-cp-suivant-la-nomenclature-mission-programm` | idem, sans colonne total, inclut les comptes spéciaux | oui, budget général seulement |
+| `execution-2013-…`, `plr-2014-…` (pièces jointes) | non profilés (encodage) | parseur générique prêt ; à confirmer |
+| `plrg-2024` (pièces jointes) | `annexe1_etat_titre_cat` (programme × titre × catégorie, €), `annexe1_etat_cp` (dépenses constatées), `annexe1_etat_recettes` (recettes par section) | oui ; `etat_cp` sert de contrôle |
+| `plf-2024-recettes-du-budget-general`, `plf25-recettes-…`, `plf25-depenses-2025-selon-destination` | prévisions PLF / LFI par ligne | oui (nature `plf` / `lfi`, hors graphiques d'exécution) |
+| `plf-2012/2013/2014-recettes-fiscales-nettes` | tableaux mis en page, M€, colonne « Exécution N-2 » | **pas encore** : en-têtes sur 2 lignes, à relire |
+| Eurostat `gov_10dd_edpt1`, `nama_10_gdp` | JSON-stat valide ; codes de dimensions non visibles dans le 1er rapport | parseur prêt ; il liste les codes présents s'ils diffèrent de ceux attendus |
+| INSEE BDM, famille « Dette négociable de l'État » | séries mensuelles (AFT) | parseur prêt ; nouvelle source, à confirmer |
 
-**Aucun chiffre n'est codé en dur.** Quand une donnée manque, elle reste paramétrable dans l'interface (champ en rouge). Les tests utilisent des fixtures abstraites (« Mission A », montants ronds) qui ne sont jamais servies comme données.
+**Trous connus.**
+- **2015 → 2023** : aucun jeu trouvé lors de la 1re passe. Le `fetch` liste désormais tout le catalogue data.economie et sélectionne par identifiant et titre.
+- **Dette de l'État** : absente des fichiers DGFiP en données. On prend la **dette négociable** (AFT, via INSEE), qui est une partie de la dette financière de l'État ; elle est affichée sous ce nom.
+- **Solde d'exécution officiel** : uniquement dans les PDF de la SME. L'outil affiche le **solde du budget général calculé** (recettes nettes − dépenses nettes), sans les comptes spéciaux.
+- **Recettes 2010–2023** : seule 2024 est ingérée pour l'instant.
 
-### Ce qui reste à faire après inspection
+`data/raw/manifest.json` trace chaque fichier : URL effective, date de récupération (UTC), taille, sha256. `budget ingest` produit aussi :
+- `data/VALIDATION.md` : contrôles croisés entre montants publiés et agrégation des tables, et couverture par exercice (les trous y apparaissent en **manquant**) ;
+- `data/NON_RAPPROCHES.md` : programmes non rapprochés d'une année à l'autre.
 
-1. Écrire les parseurs `dgfip_sme`, `economie_sme` et `economie_plrg` dans `ingest.py` (aujourd'hui ils lèvent `NotInspected`, et `ingest` les liste comme « en attente »).
-2. Confirmer les codes Eurostat : si un code manque, le parseur échoue en listant les codes présents.
-3. Vérifier les règles de `rigidites.py` sur les libellés réels.
+Le statut de chaque fichier est affiché : ingéré, ignoré (doublon AE, compte spécial, annexe non utilisée), à inspecter (format inconnu, avec ses en-têtes) ou en erreur. **Aucun chiffre n'est codé en dur, et un format inconnu n'est jamais deviné.**
+
+### Conventions de normalisation
+
+- Montants convertis en **M€** ; nombres français (`1 234,56`), encodages UTF-8, cp1252 et latin-1 gérés.
+- Budget général seulement, selon la numérotation des programmes : < 600 budget général, 6xx budgets annexes, 7xx CAS, 8xx CCF, 9xx comptes de commerce.
+- **Vue nette** : les programmes 200/201 (remboursements et dégrèvements) sont stockés mais exclus des dépenses, car les recettes fiscales sont nettes.
+- Recettes 2024 : totaux par section de la colonne « Total des recettes** ». Le sens exact de `**` reste à confirmer dans la notice (zip `notices_par_fichiers_csv_plrg_2024`, que le nouvel `inspect` décompresse).
+- Prélèvements sur recettes (UE, collectivités) : stockés en positif, retranchés des recettes nettes.
+- Charge de la dette : programme 117 (titre 4).
+
+### Ce qui reste à faire
+
+1. Relancer `budget fetch` puis `budget inspect`, et partager `data/INSPECTION.md`. On y verra : le catalogue complet, les fichiers 2013–2014, la notice PLRG, les codes Eurostat et les séries INSEE.
+2. Écrire le parseur des tableaux « recettes fiscales nettes », puis ceux des formats 2015–2023 qui ne seraient pas déjà reconnus.
+3. Vérifier `rigidites.py` sur les libellés réels.
 
 ## Nomenclature mission / programme
 
@@ -81,7 +104,7 @@ Le rapprochement est automatique (`nomenclature.py`), avec comme référence l'e
 
 ## Périmètres : ne pas mélanger
 
-- **Dette de l'État** : dette financière de l'État (DGFiP). C'est le **seul** périmètre des calculs du simulateur et des graphiques « État ».
+- **Dette de l'État** : dette **négociable** de l'État (AFT, série INSEE). C'est le **seul** périmètre des calculs du simulateur et des graphiques « État ». Elle est inférieure à la dette financière totale de l'État.
 - **Dette publique au sens de Maastricht** : toutes les APU (État + ASSO + APUL), source Eurostat. Elle est affichée dans un bloc séparé, à titre de contexte, et n'entre dans aucun calcul.
 
 Chaque graphique porte une étiquette de périmètre.

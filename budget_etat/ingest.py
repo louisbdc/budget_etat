@@ -4,9 +4,14 @@ Idempotent : la base est reconstruite intégralement dans un fichier temporaire
 à partir du cache data/raw/, puis substituée à l'ancienne. Une ingestion qui
 échoue ne casse donc pas la base existante.
 
-Chaque parseur est déclaré dans PARSERS avec le motif de fichiers qu'il traite.
-Les parseurs des sources DGFiP / data.economie ne sont PAS encore écrits : leurs
-schémas n'ont pas pu être inspectés (cf. README). Ils lèvent NotInspected.
+Chaque parseur est déclaré dans PARSERS avec le motif de fichiers qu'il traite
+(parseurs dans sources.py). Issues possibles pour un fichier :
+- ingéré ;
+- ignoré (`Skip` : doublon AE, compte spécial, annexe non utilisée) ;
+- à inspecter (`NotInspected` / `UnknownFormat` : format pas encore vu) ;
+- erreur (exception inattendue).
+Après ingestion : rapport de rapprochement (NON_RAPPROCHES.md) et de cohérence
+(VALIDATION.md : contrôles croisés et couverture par exercice).
 """
 
 from __future__ import annotations
@@ -18,12 +23,14 @@ from pathlib import Path
 
 import duckdb
 
-from budget_etat import db, nomenclature
+from budget_etat import db, nomenclature, sources
 from budget_etat.fetch import RAW_DIR, ROOT, load_manifest
 from budget_etat.jsonstat import decode
+from budget_etat.sources import Skip, UnknownFormat
 
 CORRESPONDANCES = ROOT / "data" / "correspondances.csv"
 NON_RAPPROCHES = ROOT / "data" / "NON_RAPPROCHES.md"
+VALIDATION = "VALIDATION.md"
 
 
 class NotInspected(Exception):
@@ -72,7 +79,6 @@ def parse_eurostat(path: Path) -> Iterator[Row]:
                                 source=f"Eurostat {code}")
 
 
-# --- DGFiP / data.economie : en attente d'inspection -------------------------
 def _pending(path: Path) -> Iterator[Row]:
     raise NotInspected(f"{path.parent.name}/{path.name} : schéma non inspecté, parseur à écrire")
     yield  # pragma: no cover
@@ -80,9 +86,14 @@ def _pending(path: Path) -> Iterator[Row]:
 
 PARSERS: list[Parser] = [
     Parser("eurostat", "eurostat/*.json", parse_eurostat),
-    Parser("dgfip_sme", "dgfip_sme/*.csv", _pending),
-    Parser("economie_sme", "economie/situation-mensuelle-de-l-etat/export.csv", _pending),
-    Parser("economie_plrg", "economie/plrg-*/attachments/*", _pending),
+    Parser("insee", "insee/*.xml", sources.parse_insee),
+    Parser("execution", "economie/execution-*/export.csv", sources.parse_exec_titres),
+    Parser("execution", "economie/execution-*/attachments/*", sources.parse_exec_titres),
+    Parser("plr", "economie/plr*/attachments/*", sources.parse_plr_attachment),
+    Parser("plf_recettes", "economie/*recettes-du-budget-general/export.csv", sources.parse_plf_recettes),
+    Parser("plf_depenses", "economie/*depenses*destination/export.csv", sources.parse_plf_depenses),
+    # Tableaux mis en page (en-têtes sur 2 lignes) : à écrire après l'inspection complète.
+    Parser("plf_recettes_nettes", "economie/plf-*-recettes-fiscales-nettes/attachments/*", _pending),
 ]
 
 
@@ -102,6 +113,13 @@ def reconcile_nomenclature(con: duckdb.DuckDBPyConnection) -> list[nomenclature.
         "FROM depense WHERE programme_code IS NOT NULL GROUP BY 1, 2").fetchall()]
     matches = nomenclature.reconcile(progs, nomenclature.load_manual(CORRESPONDANCES))
     _insert(con, "nomenclature_programme", [m.__dict__ for m in matches])
+    # Sources sans mission (exécution 2010, nomenclature ministère) : mission
+    # déduite de la correspondance, marquée mission_code = 'déduite'.
+    con.execute("""
+        UPDATE depense d SET mission_lib = n.mission_canon, mission_code = 'déduite'
+        FROM nomenclature_programme n
+        WHERE d.mission_lib IS NULL AND n.exercice = d.exercice AND n.programme_code = d.programme_code
+          AND n.mission_canon IS NOT NULL""")
     return matches
 
 
@@ -118,6 +136,55 @@ def write_unmatched_report(matches: list[nomenclature.Match], path: Path = NON_R
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def write_validation_report(con: duckdb.DuckDBPyConnection, path: Path) -> None:
+    """Contrôles croisés (montants publiés vs agrégation des tables) et couverture."""
+    from budget_etat.queries import NET_FILTER
+
+    lines = ["# Validation de l'ingestion", "", "## Contrôles croisés", "",
+             "Écart = agrégation des tables canoniques − montant de référence publié (M€).", "",
+             "| exercice | contrôle | référence | obtenu | écart | source |", "|---|---|---|---:|---:|---|"]
+    rows = con.execute(f"""
+        WITH ref AS (SELECT * FROM controle),
+        dep AS (SELECT exercice, 'programme ' || programme_code AS cle, sum(montant_meur) AS v
+                FROM depense WHERE nature = 'execution' GROUP BY 1, 2),
+        rec AS (SELECT exercice, 'recettes ' || categorie AS cle, sum(montant_meur) AS v
+                FROM recette WHERE nature = 'execution' GROUP BY 1, 2)
+        SELECT r.exercice, r.cle, r.reference, coalesce(d.v, c.v) AS obtenu, r.source
+        FROM ref r LEFT JOIN dep d USING (exercice, cle) LEFT JOIN rec c USING (exercice, cle)
+        ORDER BY abs(coalesce(coalesce(d.v, c.v), 0) - r.reference) DESC, r.cle""").fetchall()
+    n_ok = 0
+    for ex, cle, ref, got, src in rows:
+        ecart = None if got is None else got - ref
+        if ecart is not None and abs(ecart) < 0.01:
+            n_ok += 1
+            continue
+        lines.append(f"| {ex} | {cle} | {ref:,.2f} | {'–' if got is None else f'{got:,.2f}'} | "
+                     f"{'absent' if ecart is None else f'{ecart:,.2f}'} | {src} |")
+    lines += ["", f"{n_ok} contrôle(s) exact(s) à 0,01 M€ près (non listés), {len(rows) - n_ok} écart(s) listé(s).", ""]
+    lines += ["## Couverture par exercice (exécution)", "",
+              "Dépenses nettes = budget général hors remboursements et dégrèvements (programmes 200/201).", "",
+              "| exercice | programmes | dépenses nettes | dont titre 4 | recettes nettes | dette État (déc.) | PIB |",
+              "|---|---:|---:|---:|---:|---:|---:|"]
+    cov = con.execute(f"""
+        WITH d AS (SELECT exercice, count(DISTINCT programme_code) np, sum(montant_meur) dep,
+                          sum(CASE WHEN titre_code = '4' THEN montant_meur END) t4
+                   FROM depense WHERE nature = 'execution' AND {NET_FILTER} GROUP BY 1),
+        r AS (SELECT exercice, sum(CASE WHEN categorie = 'prelevement' THEN -montant_meur ELSE montant_meur END) rec
+              FROM recette WHERE nature = 'execution' GROUP BY 1),
+        a AS (SELECT exercice, max(montant_meur) FILTER (WHERE indicateur = 'dette_etat' AND mois = 12) dette
+              FROM agregat_etat GROUP BY 1),
+        m AS (SELECT annee AS exercice, max(valeur_meur) FILTER (WHERE indicateur = 'pib_nominal') pib
+              FROM macro GROUP BY 1),
+        y AS (SELECT exercice FROM d UNION SELECT exercice FROM r UNION SELECT exercice FROM a)
+        SELECT y.exercice, np, dep, t4, rec, dette, pib FROM y LEFT JOIN d USING (exercice)
+        LEFT JOIN r USING (exercice) LEFT JOIN a USING (exercice) LEFT JOIN m USING (exercice)
+        ORDER BY 1""").fetchall()
+    f = lambda v: "**manquant**" if v is None else f"{v:,.0f}"
+    for ex, np_, dep, t4, rec, dette, pib in cov:
+        lines.append(f"| {ex} | {np_ or '**0**'} | {f(dep)} | {f(t4)} | {f(rec)} | {f(dette)} | {f(pib)} |")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def run(raw_dir: Path = RAW_DIR, db_path: Path = db.DB_PATH, parsers: list[Parser] | None = None) -> int:
     parsers = PARSERS if parsers is None else parsers
     manifest = load_manifest() if raw_dir == RAW_DIR else {}
@@ -125,7 +192,7 @@ def run(raw_dir: Path = RAW_DIR, db_path: Path = db.DB_PATH, parsers: list[Parse
     tmp = db_path.with_suffix(".tmp.duckdb")
     tmp.unlink(missing_ok=True)
     con = db.connect(tmp)
-    pending, errors, done = [], [], 0
+    pending, errors, done, skipped = [], [], 0, 0
     try:
         for p in parsers:
             for f in sorted(raw_dir.glob(p.pattern)):
@@ -135,8 +202,11 @@ def run(raw_dir: Path = RAW_DIR, db_path: Path = db.DB_PATH, parsers: list[Parse
                     buf: dict[str, list[dict]] = {}
                     for table, row in p.fn(f):
                         buf.setdefault(table, []).append(row)
-                except NotInspected as e:
-                    pending.append(str(e))
+                except Skip:
+                    skipped += 1
+                    continue
+                except (NotInspected, UnknownFormat) as e:
+                    pending.append(f"{p.name} {f.parent.name}/{f.name} : {e}"[:400])
                     continue
                 except Exception as e:
                     errors.append(f"{p.name} {f.name}: {type(e).__name__}: {e}")
@@ -152,6 +222,7 @@ def run(raw_dir: Path = RAW_DIR, db_path: Path = db.DB_PATH, parsers: list[Parse
         matches = reconcile_nomenclature(con)
         if matches:
             write_unmatched_report(matches, db_path.parent / NON_RAPPROCHES.name)
+        write_validation_report(con, db_path.parent / VALIDATION)
         con.close()
         tmp.replace(db_path)
     finally:
@@ -160,5 +231,6 @@ def run(raw_dir: Path = RAW_DIR, db_path: Path = db.DB_PATH, parsers: list[Parse
         print(f"… {msg}")
     for msg in errors:
         print(f"ERREUR {msg}")
-    print(f"{done} fichier(s) ingéré(s), {len(pending)} en attente d'inspection, {len(errors)} erreur(s). Base : {db_path}")
+    print(f"{done} fichier(s) ingéré(s), {skipped} ignoré(s), {len(pending)} à inspecter, "
+          f"{len(errors)} erreur(s). Base : {db_path}")
     return 1 if errors else 0

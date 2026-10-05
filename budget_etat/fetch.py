@@ -31,19 +31,33 @@ DATAGOUV_DATASETS = {
 
 # --- data.economie.gouv.fr (Opendatasoft, API explore v2.1) ------------------
 ODS_BASE = "https://data.economie.gouv.fr/api/explore/v2.1"
-# Identifiants repérés par recherche web (non vérifiés faute d'accès réseau) :
+# Jeux toujours téléchargés (identifiants confirmés par la 1re inspection).
 ODS_DATASETS = [
-    "situation-mensuelle-de-l-etat",  # miroir ODS de la SME DGFiP
-    "plrg-2024",  # projet de loi relative aux résultats et à la gestion 2024 (annexes CSV en pièces jointes)
+    "plrg-2024",  # résultats de la gestion 2024 : annexes CSV en pièces jointes
     "plf-2024-recettes-du-budget-general",
+    "plf25-recettes-du-budget-general",
     "plf25-depenses-2025-selon-destination",
 ]
-# Recherches au catalogue : le résultat est sauvegardé, et les jeux dont
-# l'identifiant correspond à ODS_AUTO_PATTERNS sont aussi téléchargés.
-ODS_QUERIES = ["situation mensuelle", "loi de règlement", "résultats et gestion", "exécution budget",
-               "recettes du budget général", "recettes fiscales", "loi de finances initiale"]
-ODS_AUTO_PATTERNS = [r"^plrg?-?\d{2,4}", r"^execution-\d{4}", r"recettes"]
-ODS_MAX_AUTO = 40  # garde-fou
+# Le catalogue complet est listé (data/raw/economie/_catalog_all.json) puis filtré
+# sur identifiant + titre (sans accents, minuscules). Inclusion si UN motif
+# correspond, exclusion si UN motif d'exclusion correspond.
+ODS_INCLUDE = [
+    r"^plrg?-\d{4}",  # lois de règlement / résultats de la gestion
+    r"loi de reglement|resultats de la gestion",
+    r"^execution-\d{4}-du-budget-(general|de-letat)",
+    r"recettes fiscales nettes",
+    r"recettes du budget general",
+    r"depenses .*selon destination",
+]
+ODS_EXCLUDE = [r"performance", r"budget vert", r"-en-ae$", r"comptes-d", r"ministere-progr"]
+ODS_MAX_AUTO = 120  # garde-fou
+
+# --- INSEE (BDM) : dette négociable de l'État -------------------------------
+# La page de la famille BDM liste les identifiants de séries ; on les télécharge
+# ensuite via l'API SDMX publique. 001711532 (court terme) est connu d'avance.
+INSEE_FAMILLES = {"dette_negociable": "https://www.insee.fr/fr/plan-du-site/famille-bdm/102765717"}
+INSEE_SERIES_CONNUES = ["001711532"]
+INSEE_SDMX = "https://bdm.insee.fr/series/sdmx/data/SERIES_BDM"
 
 # --- Eurostat (JSON-stat) : agrégats APU au sens de Maastricht et PIB --------
 EUROSTAT = "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data"
@@ -152,21 +166,64 @@ def _ods_dataset(client: httpx.Client, manifest: dict, ds: str) -> None:
     _save_manifest(manifest)
 
 
+def _norm(s: str) -> str:
+    import unicodedata
+
+    return unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode().lower()
+
+
+def select_datasets(catalog: list[dict]) -> list[str]:
+    """Filtre le catalogue sur identifiant + titre (fonction pure, testée)."""
+    out = []
+    for d in catalog:
+        text = f"{d['id']} {_norm(d.get('title', ''))}"
+        if any(re.search(p, d["id"]) or re.search(p, text) for p in ODS_INCLUDE) and \
+                not any(re.search(p, d["id"]) or re.search(p, text) for p in ODS_EXCLUDE):
+            out.append(d["id"])
+    return out
+
+
 def fetch_economie(client: httpx.Client, manifest: dict) -> None:
-    found: list[str] = []
-    for q in ODS_QUERIES:
-        entry = _download(client, f"{ODS_BASE}/catalog/datasets", RAW_DIR / "economie" / f"_catalog_{_slug(q)}.json",
-                          params={"where": f'search("{q}")', "limit": 100, "select": "dataset_id"})
-        manifest[f"economie/_catalog/{_slug(q)}"] = entry
-        res = json.loads((RAW_DIR / entry["path"]).read_text()).get("results", [])
-        found += [r["dataset_id"] for r in res if any(re.search(p, r["dataset_id"]) for p in ODS_AUTO_PATTERNS)]
-    _save_manifest(manifest)
-    auto = [d for d in dict.fromkeys(found) if d not in ODS_DATASETS][:ODS_MAX_AUTO]
+    catalog: list[dict] = []
+    offset = 0
+    while True:
+        r = client.get(f"{ODS_BASE}/catalog/datasets", params={"limit": 100, "offset": offset},
+                       follow_redirects=True).raise_for_status().json()
+        for d in r.get("results", []):
+            meta = (d.get("metas") or {}).get("default") or {}
+            catalog.append({"id": d["dataset_id"], "title": meta.get("title"), "modified": meta.get("modified")})
+        offset += 100
+        if offset >= r.get("total_count", 0) or not r.get("results"):
+            break
+    dest = RAW_DIR / "economie" / "_catalog_all.json"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(json.dumps(catalog, indent=1, ensure_ascii=False))
+    print(f"+ catalogue data.economie : {len(catalog)} jeux")
+    auto = [d for d in select_datasets(catalog) if d not in ODS_DATASETS][:ODS_MAX_AUTO]
+    print(f"  {len(auto)} jeux sélectionnés automatiquement")
     for ds in ODS_DATASETS + auto:
         try:
             _ods_dataset(client, manifest, ds)
         except httpx.HTTPStatusError as e:
             print(f"! economie/{ds} : HTTP {e.response.status_code}")
+
+
+def fetch_insee(client: httpx.Client, manifest: dict) -> None:
+    ids = list(INSEE_SERIES_CONNUES)
+    for name, url in INSEE_FAMILLES.items():
+        r = client.get(url, follow_redirects=True)
+        if r.status_code == 200:
+            (RAW_DIR / "insee").mkdir(parents=True, exist_ok=True)
+            (RAW_DIR / "insee" / f"_famille_{name}.html").write_text(r.text)
+            ids += re.findall(r"/statistiques/serie/(\d{9})", r.text)
+        else:
+            print(f"! INSEE famille {name} : HTTP {r.status_code}")
+    ids = list(dict.fromkeys(ids))
+    entry = _download(client, f"{INSEE_SDMX}/{'+'.join(ids)}", RAW_DIR / "insee" / "dette_negociable.xml")
+    entry["series"] = ids
+    manifest["insee/dette_negociable"] = entry
+    print(f"+ INSEE : {len(ids)} séries")
+    _save_manifest(manifest)
 
 
 def fetch_eurostat(client: httpx.Client, manifest: dict) -> None:
@@ -182,7 +239,7 @@ def run() -> int:
     manifest = load_manifest()
     errors = []
     with httpx.Client(timeout=TIMEOUT, headers={"User-Agent": "budget-etat (usage perso)"}) as client:
-        for step in (fetch_datagouv, fetch_economie, fetch_eurostat):
+        for step in (fetch_datagouv, fetch_economie, fetch_insee, fetch_eurostat):
             try:
                 step(client, manifest)
             except httpx.HTTPError as e:

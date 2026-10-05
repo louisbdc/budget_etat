@@ -126,9 +126,10 @@ def test_failed_ingest_keeps_previous_db(built_db):
 
 def test_pending_parser_is_reported_not_faked(tmp_path, capsys):
     raw = tmp_path / "raw"
-    (raw / "dgfip_sme").mkdir(parents=True)
-    (raw / "dgfip_sme" / "x.csv").write_text("a\n1\n")
-    rc = ingest.run(raw, tmp_path / "b.duckdb", [p for p in ingest.PARSERS if p.name == "dgfip_sme"])
+    d = raw / "economie" / "plf-2014-recettes-fiscales-nettes" / "attachments"
+    d.mkdir(parents=True)
+    (d / "x_csv").write_text("a\n1\n")
+    rc = ingest.run(raw, tmp_path / "b.duckdb", [p for p in ingest.PARSERS if p.name == "plf_recettes_nettes"])
     assert rc == 0
     assert "schéma non inspecté" in capsys.readouterr().out
     con = connect(tmp_path / "b.duckdb", read_only=True)

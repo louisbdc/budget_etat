@@ -28,6 +28,11 @@ def _annual(table: str, extra: str = "") -> str:
     )"""
 
 
+# Vue « nette » du budget général : hors remboursements et dégrèvements
+# (programmes 200/201), déjà déduits des recettes fiscales nettes.
+NET_FILTER = ("coalesce(programme_code, '') NOT IN ('200', '201') "
+              "AND coalesce(mission_lib, '') NOT ILIKE 'Remboursements et dégrèvements%'")
+DEP_NET = _annual("depense", f"AND {NET_FILTER}")
 REC_NET = _annual("recette", "AND coalesce(sens, 'net') = 'net'")
 
 
@@ -42,7 +47,7 @@ def _annual_agregat() -> str:
 def status(con: duckdb.DuckDBPyConnection) -> dict:
     counts = {t: con.execute(f"SELECT count(*) FROM {t}").fetchone()[0]
               for t in ("depense", "recette", "agregat_etat", "macro", "nomenclature_programme")}
-    years = [r[0] for r in con.execute(f"SELECT DISTINCT exercice FROM {_annual('depense')} ORDER BY 1").fetchall()]
+    years = [r[0] for r in con.execute(f"SELECT DISTINCT exercice FROM {DEP_NET} ORDER BY 1").fetchall()]
     sources = [dict(zip(("path", "url", "fetched_at", "parser"), r)) for r in
                con.execute("SELECT path, url, fetched_at, parser FROM source_file ORDER BY path").fetchall()]
     nomen = dict(con.execute("SELECT methode, count(*) FROM nomenclature_programme GROUP BY 1").fetchall())
@@ -55,9 +60,9 @@ def gdp(con: duckdb.DuckDBPyConnection) -> dict[int, float]:
 
 def series(con: duckdb.DuckDBPyConnection) -> dict:
     """Séries annuelles. Les deux périmètres sont renvoyés séparément."""
-    dep = dict(con.execute(f"SELECT exercice, sum(montant_meur) FROM {_annual('depense')} GROUP BY 1").fetchall())
+    dep = dict(con.execute(f"SELECT exercice, sum(montant_meur) FROM {DEP_NET} GROUP BY 1").fetchall())
     charge = dict(con.execute(
-        f"SELECT exercice, sum(montant_meur) FROM {_annual('depense')} WHERE programme_code IN "
+        f"SELECT exercice, sum(montant_meur) FROM {DEP_NET} WHERE programme_code IN "
         f"({', '.join(repr(c) for c in CHARGE_DETTE_PROGRAMMES)}) GROUP BY 1").fetchall())
     rec = dict(con.execute(
         f"SELECT exercice, sum(CASE WHEN categorie = 'prelevement' THEN -montant_meur ELSE montant_meur END) "
@@ -108,7 +113,7 @@ def sankey(con: duckdb.DuckDBPyConnection, exercice: int, top_recettes: int = 12
         f"ORDER BY 3 DESC", [exercice]).fetchall()
     dep = con.execute(
         f"SELECT coalesce(mission_lib, mission_code, '?'), coalesce(programme_lib, programme_code, '?'), "
-        f"any_value(programme_code), sum(montant_meur) FROM {_annual('depense')} WHERE exercice = ? GROUP BY 1, 2",
+        f"any_value(programme_code), sum(montant_meur) FROM {DEP_NET} WHERE exercice = ? GROUP BY 1, 2",
         [exercice]).fetchall()
     BG = "Budget général"
     nodes: dict[str, dict] = {BG: {"name": BG, "kind": "bg"}}
@@ -150,7 +155,7 @@ def sankey(con: duckdb.DuckDBPyConnection, exercice: int, top_recettes: int = 12
 def drill(con: duckdb.DuckDBPyConnection, exercice: int, mission: str | None = None,
           programme: str | None = None) -> dict:
     """Mission -> programme -> titre, avec % du total et % du PIB."""
-    base = f"{_annual('depense')}"
+    base = f"{DEP_NET}"
     total = con.execute(f"SELECT sum(montant_meur) FROM {base} WHERE exercice = ?", [exercice]).fetchone()[0] or 0
     pib = _gdp_for(con, exercice)
     if programme is not None:
@@ -197,7 +202,7 @@ def sim_base(con: duckdb.DuckDBPyConnection, exercice: int | None = None) -> dic
     for m, code, lib, titre, v in con.execute(
             f"SELECT coalesce(n.mission_canon, d.mission_lib, d.mission_code), d.programme_code, "
             f"any_value(coalesce(d.programme_lib, d.programme_code)), bool_or(d.titre_code = '2'), sum(d.montant_meur) "
-            f"FROM {_annual('depense')} d LEFT JOIN nomenclature_programme n "
+            f"FROM {DEP_NET} d LEFT JOIN nomenclature_programme n "
             f"ON n.exercice = d.exercice AND n.programme_code = d.programme_code "
             f"WHERE d.exercice = ? GROUP BY 1, 2 ORDER BY 1, 2", [exercice]).fetchall():
         if code in CHARGE_DETTE_PROGRAMMES:
