@@ -229,7 +229,9 @@ def write_validation_report(con: duckdb.DuckDBPyConnection, path: Path, dedup_lo
                      f"{'absent' if ecart is None else f'{ecart:,.2f}'} | {src} |")
     lines += ["", f"{n_ok} contrôle(s) exact(s) à 0,01 M€ près (non listés), {len(rows) - n_ok} écart(s) listé(s).", ""]
     lines += ["## Rapprochement SMB (agrégats officiels) / détail par programme et par impôt", "",
-              "Pour les exercices couverts par les deux. Écart = détail − SMB (M€).", "",
+              "Pour les exercices couverts par les deux. Écart = détail − SMB (M€). "
+              "⚠ = écart > 0,5 % : le détail de l'exercice est suspect (les graphiques d'évolution "
+              "utilisent de toute façon l'agrégat SMB).", "",
               "| exercice | grandeur | SMB | détail | écart |", "|---|---|---:|---:|---:|"]
     for ex, nom, smb, det in con.execute(f"""
             WITH a AS (SELECT exercice, indicateur, montant_meur FROM agregat_etat WHERE mois = 12),
@@ -243,7 +245,8 @@ def write_validation_report(con: duckdb.DuckDBPyConnection, path: Path, dedup_lo
             SELECT a.exercice, 'charge de la dette (titre 4)', a.montant_meur, t4.v FROM a JOIN t4 USING (exercice)
               WHERE a.indicateur = 'charge_dette'
             ORDER BY 1, 2""").fetchall():
-        lines.append(f"| {ex} | {nom} | {smb:,.0f} | {det:,.0f} | {det - smb:,.1f} |")
+        alerte = " ⚠" if smb and abs(det - smb) > 0.005 * abs(smb) else ""
+        lines.append(f"| {ex}{alerte} | {nom} | {smb:,.0f} | {det:,.0f} | {det - smb:,.1f} |")
     lines += ["", "## Sources écartées (doublons)", "",
               "Quand plusieurs sources couvrent la même clé, seule la plus prioritaire est gardée "
               "(SMB/INSEE/Eurostat > PLRG > PLR > exécution data.economie > PLF).", "",

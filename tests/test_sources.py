@@ -558,3 +558,16 @@ def test_plr_amount_garbage_is_skipped_and_reported(tmp_path):
     assert con.execute("SELECT sum(montant_meur) FROM depense").fetchone()[0] == 150
     t = (tmp_path / "VALIDATION.md").read_text()
     assert "| ingéré ⚠ |" in t and "Expr2" in t
+
+
+def test_destination_nature_keeps_only_plr_rows(tmp_path):
+    d = tmp_path / "raw/economie/projet-de-loi-de-reglement-2020-plr-2020/attachments"
+    head = ["exercice", "loi", "typeBudget", "ministere", "mission", "programme", "action", "sous_action",
+            "categorie", "titre", "AE EXEC", "CP EXEC"]
+    rows = [[2020.0, loi, "BG", 7.0, "TR", 348.0, "348-11", None, 31.0, 3.0, 1.0, v]
+            for loi, v in [("PLR", 1000000.0), ("LFI", 900000.0), ("LFR", 950000.0)]]
+    _xlsx(d / "plr2020_credits_destination_nature_xls", [head] + rows)
+    assert ingest.run(tmp_path / "raw", tmp_path / "b.duckdb") == 0
+    con = connect(tmp_path / "b.duckdb", read_only=True)
+    assert con.execute("SELECT sum(montant_meur) FROM depense").fetchone()[0] == 1.0
+    assert "lignes des lois ['LFI', 'LFR'] écartées" in (tmp_path / "VALIDATION.md").read_text()

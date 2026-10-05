@@ -319,6 +319,15 @@ def parse_destination_nature(path: Path) -> Iterator[Row]:
         years = {int(_code(r.get(v["exercice"]))) for r in rows if _code(r.get(v["exercice"])).isdigit()}
         if ex is None and len(years) == 1:
             ex = years.pop()  # quelques lignes sans exercice dans un fichier mono-exercice
+        # Colonne « loi » : ne garder que l'exécution (PLR / PLRG) si d'autres lois
+        # (LFI, LFR…) sont mélangées dans le même classeur.
+        lois = {str(r.get("loi") or "").strip().upper() for r in rows if r.get("loi")}
+        autres_lois = sorted(lois - {"PLR", "PLRG"})
+        if "loi" in headers and lois and not lois & {"PLR", "PLRG"}:
+            raise UnknownFormat(f"aucune ligne d'exécution (PLR) : lois présentes {sorted(lois)}")
+        if autres_lois:
+            rows = [r for r in rows if str(r.get("loi") or "").strip().upper() in ("PLR", "PLRG", "")]
+            yield "avertissement", {"message": f"lignes des lois {autres_lois} écartées (seule l'exécution PLR est gardée)"}
         agg: dict[tuple, float] = defaultdict(float)
         bad: list[dict] = []
         for r in rows:
