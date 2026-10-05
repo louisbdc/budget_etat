@@ -78,7 +78,12 @@
         <p class="note">Valeurs par défaut indicatives, à ajuster : aucune n'est tirée des données.</p>
       </aside>
       <div>
-        <h3>Mesures</h3>
+        <div class="toolbar">
+          <h3 style="margin:0">Mesures</h3>
+          <span class="spacer"></span>
+          <label>Charger un programme <select id="prog-list"><option value="">—</option></select></label>
+        </div>
+        <div id="prog-info" class="note"></div>
         <table id="sim-measures" class="data"></table>
         <div class="toolbar">
           <button id="m-add">+ Mesure</button>
@@ -90,8 +95,9 @@
           <button id="sc-del">Supprimer</button>
         </div>
         <div class="toolbar">
-          <label>Comparer avec : <select id="sc-compare" multiple size="3"></select></label>
+          <label>Comparer avec (scénarios et programmes, Ctrl/⌘ pour plusieurs) : <select id="sc-compare" multiple size="4"></select></label>
         </div>
+        <p class="note">Tous les scénarios comparés utilisent les mêmes hypothèses macro (panneau de gauche) : les écarts ne viennent que des mesures.</p>
         <div id="sim-error" class="error" hidden></div>
         <div class="grid">
           <figure><figcaption>Déficit de l'État (M€) <span class="perimetre">État</span></figcaption><div class="chart" id="s-deficit"></div></figure>
@@ -99,6 +105,16 @@
           <figure><figcaption>Dette de l'État / PIB (%) <span class="perimetre">État</span></figcaption><div class="chart" id="s-ratio"></div></figure>
           <figure><figcaption>Charge d'intérêts (M€) <span class="perimetre">État</span></figcaption><div class="chart" id="s-interet"></div></figure>
         </div>
+        <h3>Comparaison à l'horizon <span class="perimetre">État</span></h3>
+        <table id="sim-compare" class="data"></table>
+        <div class="grid">
+          <figure><figcaption>Déficit de l'État / PIB (%) <span class="perimetre">État</span></figcaption><div class="chart" id="s-def-pib"></div></figure>
+          <figure><figcaption>D'où vient l'écart de déficit (M€, scénario courant − référence)</figcaption><div class="chart" id="s-decomp"></div>
+            <p class="note">Barres au-dessus de 0 : creusent le déficit. En dessous : le réduisent. Les recettes sont comptées avec le signe de leur effet sur le déficit.</p></figure>
+          <figure><figcaption>Ce qui monte, ce qui baisse : dépenses par mission (M€, écart à la référence)</figcaption><div class="chart" id="s-dep-groups"></div></figure>
+          <figure><figcaption>Ce qui monte, ce qui baisse : recettes par poste (M€, écart à la référence)</figcaption><div class="chart" id="s-rec-groups"></div></figure>
+        </div>
+        <h3>Détail année par année (scénario courant)</h3>
         <table id="sim-table" class="data"></table>
       </div>
     </div>

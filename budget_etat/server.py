@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from budget_etat import db, queries
+from budget_etat import db, programmes as prog, queries
 from budget_etat.fetch import ROOT
 from budget_etat.projection import Assumptions, BaseYear, Line, Measure, compare, project
 
@@ -20,7 +20,8 @@ WEB = ROOT / "web"
 SCENARIOS = ROOT / "data" / "scenarios"
 
 
-def create_app(db_path: Path = db.DB_PATH, scenarios_dir: Path = SCENARIOS) -> FastAPI:
+def create_app(db_path: Path = db.DB_PATH, scenarios_dir: Path = SCENARIOS,
+               programmes_dir: Path = prog.PROGRAMMES_DIR) -> FastAPI:
     app = FastAPI(title="Budget de l'État")
 
     @contextmanager
@@ -72,6 +73,22 @@ def create_app(db_path: Path = db.DB_PATH, scenarios_dir: Path = SCENARIOS) -> F
             raise HTTPException(422, str(e)) from e
         return {"perimetre": queries.PERIMETRE_ETAT, "reference": [_row(r) for r in ref],
                 "scenario": [_row(r) for r in sc], "diff": compare(ref, sc)}
+
+    @app.get("/api/programmes")
+    def list_programmes():
+        return prog.lister(programmes_dir)
+
+    @app.get("/api/programmes/{ident}")
+    def get_programme(ident: str, exercice: int | None = None):
+        try:
+            p = prog.charger(ident, programmes_dir)
+        except FileNotFoundError:
+            raise HTTPException(404, "programme inconnu")
+        except (prog.ProgrammeInvalide, json.JSONDecodeError) as e:
+            raise HTTPException(422, str(e))
+        with con() as c:
+            base = queries.sim_base(c, exercice)
+        return {"programme": p, "mesures": prog.resoudre(p, base), "exercice_base": base["exercice"]}
 
     @app.get("/api/scenarios")
     def list_scenarios():

@@ -150,7 +150,9 @@ def _measure_delta(m: Measure, year: int, baseline: dict[str, float], groups: di
     phase = m.phase(year)
     if phase == 0.0:
         return {}
-    keys = [m.target] if m.target in baseline else groups.get(m.target, [])
+    # Cible : une ligne, un groupe (mission, catégorie de recettes) ou « * » (toutes
+    # les lignes du côté visé, ex. « économies non ventilées »).
+    keys = list(baseline) if m.target == "*" else [m.target] if m.target in baseline else groups.get(m.target, [])
     if not keys:
         raise KeyError(f"Cible de mesure inconnue : {m.target!r}")
     total = sum(baseline[k] for k in keys)

@@ -203,3 +203,10 @@ def test_multiplier_reduces_gdp_and_revenue():
     assert y1.revenue == pytest.approx(200 * 0.995)
     # L'économie nette sur le déficit est inférieure à 10.
     assert y1.deficit == pytest.approx(190 + 10 - 199)
+
+
+def test_measure_on_all_lines():
+    m = Measure("spending", "*", "meur", -20.0, start_year=2001)
+    y1 = project(base(), Assumptions(horizon=1, **FLAT), [m])[1]
+    # 200 de dépenses (a 60, b 40, c 100) : -20 réparti au prorata
+    assert y1.spending_by_line == pytest.approx({"a": 54, "b": 36, "c": 90})

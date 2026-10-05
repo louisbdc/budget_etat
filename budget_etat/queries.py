@@ -219,12 +219,13 @@ def sim_base(con: duckdb.DuckDBPyConnection, exercice: int | None = None) -> dic
         spending.append({"key": f"P:{code}", "label": f"{code} – {lib}", "group": f"M:{m}", "group_label": m,
                          "amount": v, "rigidite": rigidites.flag("depense", programme_code=code, programme_lib=lib)})
     revenue = []
-    for cat, poste, v in con.execute(
-            f"SELECT categorie, coalesce(poste_lib, poste_code), sum(montant_meur) FROM "
-            f"{REC_NET} WHERE exercice = ? GROUP BY 1, 2 "
-            f"ORDER BY 1, 3 DESC", [exercice]).fetchall():
+    # Clé stable = code du poste (IR, TVA, PSR_UE…) quand la source en donne un.
+    for cat, code, poste, v in con.execute(
+            f"SELECT categorie, coalesce(poste_code, poste_lib), any_value(coalesce(poste_lib, poste_code)), "
+            f"sum(montant_meur) FROM {REC_NET} WHERE exercice = ? GROUP BY 1, 2 "
+            f"ORDER BY 1, 4 DESC", [exercice]).fetchall():
         sign = -1 if cat == "prelevement" else 1
-        revenue.append({"key": f"R:{poste}", "label": poste, "group": f"C:{cat}", "group_label": cat,
+        revenue.append({"key": f"R:{code}", "label": poste, "group": f"C:{cat}", "group_label": cat,
                         "amount": sign * v, "rigidite": rigidites.flag("recette", poste_lib=poste)})
     out = {"exercice": exercice, "gdp": _gdp_for(con, exercice), "debt": pick("dette_etat"),
            "interest": pick("charge_dette"), "spending": spending, "revenue": revenue,

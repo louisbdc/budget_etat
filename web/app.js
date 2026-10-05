@@ -208,7 +208,7 @@ function targetOptions(side) {
     if (!groups.has(l.group)) groups.set(l.group, { label: l.group_label, amount: 0, rig: null, lines: [] });
     const g = groups.get(l.group); g.amount += l.amount; g.lines.push(l); g.rig = g.rig || l.rigidite;
   }
-  const opts = [];
+  const opts = [el("option", { value: "*" }, side === "spending" ? "▸▸ Toutes les dépenses (au prorata)" : "▸▸ Toutes les recettes (au prorata)")];
   for (const [key, g] of groups) {
     const og = el("optgroup", { label: g.label });
     og.append(el("option", { value: key }, `▸ ${side === "spending" ? "Mission" : "Catégorie"} entière : ${g.label} (${fmt(md(g.amount))} Md€)`));
@@ -218,8 +218,21 @@ function targetOptions(side) {
   return opts;
 }
 
+const CHIFFRAGE = { porteur: "chiffré par le porteur", tiers: "chiffrage tiers", utilisateur: "hypothèse perso, sans source" };
+function origine(m) {
+  if (!m.libelle && !m.source) return "saisie manuelle";
+  const src = m.source || {};
+  const safe = /^https?:\/\//.test(src.url || "") ? src.url : null;
+  return el("div", {},
+    el("div", {}, m.libelle || ""),
+    el("span", { class: `badge ${m.chiffrage === "utilisateur" ? "partiel" : "info"}` }, CHIFFRAGE[m.chiffrage] || "?"), " ",
+    safe ? el("a", { href: safe, target: "_blank", rel: "noopener noreferrer", title: src.citation || "" }, "source") : "",
+    m.erreur ? el("div", { class: "error" }, `Non appliquée : ${m.erreur}`) : "",
+    m.note ? el("div", { class: "note" }, m.note) : "");
+}
+
 function renderMeasures() {
-  const head = el("tr", {}, ...["Côté", "Cible", "Mode", "Valeur", "Début", "Montée (ans)", ""].map((h) => el("th", {}, h)));
+  const head = el("tr", {}, ...["Origine", "Côté", "Cible", "Mode", "Valeur", "Début", "Montée (ans)", ""].map((h) => el("th", {}, h)));
   const rows = measures.map((m, i) => {
     const side = el("select", { onchange: (e) => { m.side = e.target.value; m.target = ""; renderMeasures(); } },
       el("option", { value: "spending" }, "Dépense"), el("option", { value: "revenue" }, "Recette"));
@@ -233,7 +246,8 @@ function renderMeasures() {
     mode.value = m.mode;
     const num = (k, step) => el("input", { type: "number", step, value: m[k], style: "width:90px",
                                            onchange: (e) => { m[k] = Number(e.target.value); } });
-    return el("tr", {}, el("td", {}, side), el("td", { class: "target" }, tgt, " ", badge(line?.rigidite)), el("td", {}, mode),
+    return el("tr", {}, el("td", { class: "origine" }, origine(m)), el("td", {}, side),
+      el("td", { class: "target" }, tgt, " ", badge(line?.rigidite)), el("td", {}, mode),
       el("td", {}, num("value", "any")), el("td", {}, num("start_year", 1)), el("td", {}, num("ramp_years", 1)),
       el("td", {}, el("button", { onclick: () => { measures.splice(i, 1); renderMeasures(); } }, "✕")));
   });
@@ -281,11 +295,20 @@ async function runSim() {
     const main = await api("/api/sim/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(req) });
     const others = [];
     for (const name of [...$("#sc-compare").selectedOptions].map((o) => o.value)) {
-      const sc = await api(`/api/scenarios/${encodeURIComponent(name)}`);
-      // Un scénario sauvegardé est rejoué sur la base courante, avec ses hypothèses et ses mesures.
+      let body, label = name;
+      if (name.startsWith("prog:")) {
+        // Programme : ses mesures résolues, avec les hypothèses COURANTES (identiques pour tous).
+        const r = await loadProgramme(name.slice(5));
+        body = { base: req.base, assumptions: req.assumptions, measures: r.mesures.filter((m) => m.target) };
+        label = `${r.programme.nom} — ${r.programme.porteur}`;
+      } else {
+        // Scénario sauvegardé : rejoué sur la base courante, avec les hypothèses courantes.
+        const sc = await api(`/api/scenarios/${encodeURIComponent(name)}`);
+        body = { base: req.base, assumptions: req.assumptions, measures: sc.measures || [] };
+      }
       const r = await api("/api/sim/run", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...sc, base: req.base }) });
-      others.push({ name, res: r });
+        body: JSON.stringify(body) });
+      others.push({ name: label, res: r });
     }
     renderSim(main, others);
   } catch (e) { $("#sim-error").textContent = e.message; $("#sim-error").hidden = false; }
@@ -313,13 +336,116 @@ function renderSim(main, others) {
       `${fmt(s.apparent_rate * 100, 2)} %`].map((v) => el("td", { class: "num" }, v)));
   });
   $("#sim-table").replaceChildren(el("thead", {}, head), el("tbody", {}, rows));
+  lineChart("s-def-pib", years, mk("deficit_to_gdp", (x) => x * 100), { unit: "% PIB" });
+  renderCompareTable(main, others, name);
+  renderDecomp(main);
+  renderGroupDeltas("s-dep-groups", main, "spending_by_line", BASE.spending, (l) => l.group_label);
+  renderGroupDeltas("s-rec-groups", main, "revenue_by_line", BASE.revenue, (l) => l.label);
 }
 
-async function refreshScenarioList() {
-  const names = await api("/api/scenarios");
-  $("#sc-list").replaceChildren(el("option", { value: "" }, "Charger…"), names.map((n) => el("option", { value: n }, n)));
-  $("#sc-compare").replaceChildren(...names.map((n) => el("option", { value: n }, n)));
+function barChart(id, years, series, { unit = "M€", line = null } = {}) {
+  if (!series.some((s) => s.data.some((v) => Math.abs(v || 0) > 1e-9)) && !line) {
+    return empty(id, "Aucun écart avec la référence.");
+  }
+  const c = chart(id);
+  c.setOption({
+    textStyle: { color: css("--text-secondary") },
+    grid: { left: 64, right: 16, top: 40, bottom: 28 },
+    legend: { top: 0, type: "scroll", textStyle: { color: css("--text-secondary") } },
+    tooltip: { trigger: "axis", valueFormatter: (v) => `${fmt(v, 0)} ${unit}` },
+    xAxis: { type: "category", data: years, axisLine: { lineStyle: { color: css("--border") } } },
+    yAxis: { type: "value", splitLine: { lineStyle: { color: css("--grid") } }, axisLabel: { formatter: tick } },
+    series: [
+      ...series.map((s) => ({ name: s.name, type: "bar", stack: "d", data: s.data, barMaxWidth: 28,
+        itemStyle: { color: s.color, borderColor: css("--surface-1"), borderWidth: 1 } })),
+      ...(line ? [{ name: line.name, type: "line", data: line.data, symbolSize: 6, lineStyle: { width: 2 },
+        itemStyle: { color: css("--text-primary") } }] : []),
+    ],
+  }, true);
 }
+
+// Écart scénario − référence, agrégé par groupe ; 5 groupes principaux + « Autres ».
+function renderGroupDeltas(id, main, field, lines, labelOf) {
+  const years = main.reference.map((r) => r.year);
+  const lab = Object.fromEntries(lines.map((l) => [l.key, labelOf(l)]));
+  const byGroup = new Map();
+  main.scenario.forEach((s, i) => {
+    const r = main.reference[i];
+    for (const k of Object.keys(s[field])) {
+      const g = lab[k] || k;
+      if (!byGroup.has(g)) byGroup.set(g, years.map(() => 0));
+      byGroup.get(g)[i] += s[field][k] - r[field][k];
+    }
+  });
+  const ranked = [...byGroup].filter(([, d]) => d.some((v) => Math.abs(v) > 0.5))
+    .sort((a, b) => Math.abs(b[1].reduce((x, y) => x + Math.abs(y), 0)) - Math.abs(a[1].reduce((x, y) => x + Math.abs(y), 0)));
+  const colors = SERIES();
+  const top = ranked.slice(0, 5).map(([g, d], i) => ({ name: trunc(g, 40), data: d, color: colors[i] }));
+  const rest = ranked.slice(5);
+  if (rest.length) top.push({ name: `Autres (${rest.length})`, color: css("--text-muted"),
+    data: years.map((_, i) => rest.reduce((t, [, d]) => t + d[i], 0)) });
+  barChart(id, years, top);
+}
+
+function renderDecomp(main) {
+  const years = main.reference.map((r) => r.year);
+  const d = (k) => main.scenario.map((s, i) => s[k] - main.reference[i][k]);
+  const colors = SERIES();
+  barChart("s-decomp", years, [
+    { name: "Dépenses hors intérêts", data: d("spending"), color: colors[0] },
+    { name: "Intérêts", data: d("interest"), color: colors[1] },
+    { name: "Recettes (effet sur le déficit)", data: d("revenue").map((v) => -v), color: colors[2] },
+  ], { line: { name: "Écart de déficit", data: d("deficit") } });
+}
+
+function renderCompareTable(main, others, name) {
+  const last = main.reference.length - 1;
+  const ref = main.reference;
+  const cum = (rows, k) => rows.reduce((t, r, i) => t + (i > 0 ? r[k] : 0), 0);
+  const row = (label, rows) => el("tr", {}, el("td", {}, label),
+    ...[fmt(md(rows[last].deficit)), `${fmt(rows[last].deficit_to_gdp * 100)} %`, `${fmt(rows[last].debt_to_gdp * 100)} %`,
+      fmt((rows[last].debt_to_gdp - ref[last].debt_to_gdp) * 100, 1),
+      fmt(md(cum(rows, "deficit") - cum(ref, "deficit"))), fmt(md(cum(rows, "interest") - cum(ref, "interest")))]
+      .map((v) => el("td", { class: "num" }, v)));
+  const head = el("tr", {}, el("th", {}, `En ${ref[last].year}`),
+    ...["Déficit (Md€)", "Déficit / PIB", "Dette / PIB", "Δ dette/PIB (pts)", "Δ déficit cumulé (Md€)", "Δ intérêts cumulés (Md€)"]
+      .map((h) => el("th", { class: "num" }, h)));
+  $("#sim-compare").replaceChildren(el("thead", {}, head), el("tbody", {},
+    row("Référence (sans mesure)", ref), row(name, main.scenario), ...others.map((o) => row(o.name, o.res.scenario))));
+}
+
+let PROGRAMMES = [];
+async function refreshScenarioList() {
+  const [names, progs] = await Promise.all([api("/api/scenarios"), api("/api/programmes")]);
+  PROGRAMMES = progs;
+  $("#sc-list").replaceChildren(el("option", { value: "" }, "Charger…"), ...names.map((n) => el("option", { value: n }, n)));
+  $("#prog-list").replaceChildren(el("option", { value: "" }, progs.length ? "—" : "aucun (data/programmes/*.json)"),
+    ...progs.map((p) => el("option", { value: p.id, disabled: p.erreur ? "" : null },
+      p.erreur ? `⚠ ${p.id} (invalide)` : `${p.nom} — ${p.porteur} (${p.nb_mesures} mesures)`)));
+  $("#sc-compare").replaceChildren(
+    ...names.map((n) => el("option", { value: n }, `Scénario : ${n}`)),
+    ...progs.filter((p) => !p.erreur).map((p) => el("option", { value: `prog:${p.id}` }, `Programme : ${p.nom} — ${p.porteur}`)));
+  const bad = progs.filter((p) => p.erreur);
+  if (bad.length) $("#prog-info").textContent = `Programme(s) invalide(s) : ${bad.map((p) => p.erreur).join(" | ")}`;
+}
+async function loadProgramme(id) {
+  const r = await api(`/api/programmes/${encodeURIComponent(id)}?exercice=${BASE.exercice}`);
+  return r;
+}
+$("#prog-list").addEventListener("change", async (e) => {
+  if (!e.target.value) return;
+  const r = await loadProgramme(e.target.value);
+  const p = r.programme;
+  measures.splice(0, measures.length, ...r.mesures.map((m) => ({ ...m, target: m.target || "" })));
+  $("#sc-name").value = p.nom;
+  const ko = r.mesures.filter((m) => m.erreur).length;
+  const src = p.source_principale?.url && /^https?:\/\//.test(p.source_principale.url) ? p.source_principale.url : null;
+  $("#prog-info").replaceChildren(
+    `${p.nom} — ${p.porteur}${p.statut ? ` (${p.statut})` : ""}. ${p.description || ""} `,
+    src ? el("a", { href: src, target: "_blank", rel: "noopener noreferrer" }, "source principale") : "",
+    ko ? el("span", { class: "error" }, ` ${ko} mesure(s) non appliquée(s), voir la colonne Origine.`) : "");
+  renderMeasures();
+});
 $("#sc-save").addEventListener("click", async () => {
   const n = $("#sc-name").value.trim();
   if (!n) return alert("Donner un nom au scénario.");

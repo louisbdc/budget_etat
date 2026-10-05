@@ -95,3 +95,5 @@ table.data tr.click:hover { background: var(--grid); }
 #sim-measures select, #sim-measures input { max-width: 100%; }
 #sim-measures td { white-space: nowrap; }
 #sim-measures td.target select { width: 320px; }
+.badge.info { color: var(--series-1); border-color: var(--series-1); }
+td.origine { max-width: 280px; white-space: normal !important; font-size: 12px; }

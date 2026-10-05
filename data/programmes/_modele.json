@@ -1,0 +1,22 @@
+{
+  "nom": "Nom du programme",
+  "porteur": "Candidat·e, parti ou « moi »",
+  "election": "présidentielle 2027",
+  "statut": "proposition | chiffrage tiers | hypothèse personnelle",
+  "description": "Résumé en une phrase.",
+  "source_principale": {"titre": "", "url": "", "consulte_le": "AAAA-MM-JJ"},
+  "mesures": [
+    {
+      "libelle": "Ce que dit la mesure, en clair",
+      "cote": "depense | recette",
+      "cible": "P:146 | M:Défense | R:TVA | C:fiscale | *",
+      "mode": "pct | meur",
+      "valeur": 0,
+      "debut": 2027,
+      "montee_en_charge": 1,
+      "chiffrage": "porteur | tiers | utilisateur",
+      "source": {"url": "", "citation": "phrase exacte qui donne le chiffre", "auteur": "", "consulte_le": "AAAA-MM-JJ"},
+      "note": "hypothèses de traduction (ex. « 10 Md€ sur le quinquennat » -> 2 Md€/an)"
+    }
+  ]
+}

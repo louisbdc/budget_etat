@@ -133,6 +133,26 @@ Chaque graphique porte une étiquette de périmètre.
 - **Simulateur** : année de base (pré-remplie depuis la base, modifiable), hypothèses, mesures en % ou en M€ sur un programme, une mission entière, un impôt ou une catégorie de recettes, avec une année de début et une montée en charge. Scénarios nommés enregistrés dans `data/scenarios/*.json`, comparaison de plusieurs scénarios sur les mêmes graphiques.
 - Les postes **peu pilotables** sont marqués ⚠ partout : charge de la dette (P117), prélèvement UE, titre 2 (personnel) et pensions.
 
+## Programmes (politiques ou personnels)
+
+Un programme est un fichier `data/programmes/<id>.json`. Le modèle commenté est `data/programmes/_modele.json`. Dans le simulateur, « Charger un programme » remplit le tableau des mesures ; « Comparer avec » superpose plusieurs programmes et scénarios.
+
+Chaque mesure indique :
+- `cote` : `depense` ou `recette` ;
+- `cible` : `P:146` (programme), `M:Défense` (mission, libellé comparé sans accents ni casse), `R:TVA` / `R:IR` (poste de recette), `C:fiscale` (catégorie de recettes) ou `*` (toutes les lignes du côté visé, au prorata) ;
+- `mode` (`pct` ou `meur`), `valeur`, `debut` (année), `montee_en_charge` (années) ;
+- `chiffrage` : `porteur`, `tiers` (Cour des comptes, OFCE, institut…) ou `utilisateur` (hypothèse personnelle) ;
+- `source` : `url`, `citation` exacte qui donne le chiffre, `auteur`, `consulte_le`. **Obligatoire** pour `porteur` et `tiers`, sinon le programme est refusé ;
+- `note` : comment une annonce a été traduite en mesure (ex. « 10 Md€ d'économies sur le quinquennat » → montée en charge sur 5 ans).
+
+Règles :
+- **aucun chiffre n'est deviné** : une valeur manquante rend le programme invalide (affiché comme tel) ;
+- une cible introuvable dans l'année de base est affichée « non appliquée », jamais ignorée en silence ;
+- **neutralité** : tous les programmes et scénarios comparés sont projetés avec les mêmes hypothèses macro (celles de l'interface). Les écarts ne viennent que des mesures ;
+- limites : un programme est réduit à des variations de lignes du budget général de l'État. Les mesures portant sur la Sécurité sociale, les collectivités, la réglementation ou les dépenses fiscales sans montant chiffré ne sont pas représentables. Les effets de comportement (sauf le multiplicateur optionnel) ne sont pas modélisés.
+
+Graphiques associés : déficit / PIB ; décomposition de l'écart de déficit (dépenses, intérêts, recettes) ; dépenses par mission et recettes par poste, en écart à la référence, année par année (ce qui monte, ce qui baisse, et quand) ; tableau comparatif à l'horizon.
+
 ## Simulateur : formules (`budget_etat/projection.py`)
 
 Notations pour l'année *t* (année de base *t = 0*, montants en M€ courants). Lignes de dépense = programmes **hors programme 117** (la charge d'intérêts est calculée par le modèle), groupées par mission. Lignes de recette = postes, groupés par catégorie ; les prélèvements sur recettes sont des lignes négatives.
