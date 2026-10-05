@@ -79,7 +79,7 @@ Schéma canonique (`db.py`) : `depense` (exercice, mois, periode, nature, missio
 
 **Vérifications faites sur les données réelles** (`VALIDATION.md`) :
 - 501 contrôles programme par programme exacts au centime ;
-- 2024 et 2025 : dépenses nettes et charge de la dette du détail PLRG = SMB au M€ près (443 413 et 441 194 M€) ; total fiscal 2024 PLRG = SMB (325 679 M€) ;
+- dépenses nettes et charge de la dette : détail par programme = SMB au M€ près pour 2013, 2018, 2019, 2020, 2023, 2024 et 2025 (2014 : −1,7 M€, arrondis) ; total fiscal 2024 PLRG = SMB (325 679 M€) ;
 - 2011 : recettes nettes des prélèvements = ligne « Recettes totales nettes des prélèvements » du PLF 2013 (199 151 M€) ;
 - solde SMB 2024 = recettes nettes + fonds de concours − dépenses nettes − prélèvements + soldes des comptes spéciaux et budgets annexes, au centime.
 

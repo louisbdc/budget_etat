@@ -586,3 +586,18 @@ def test_diagnostic_for_suspect_year(tmp_path):
     assert "| 2024 ⚠ | dépenses nettes |" in t and "### Diagnostic 2024" in t
     assert "| 4 | 2 | 2 | 0 | 1.00 |" in t  # titre 4 exact (1,5 M€ arrondi)
     assert "| 101 Programme A1 |" in t
+
+
+def test_total_row_without_programme_is_not_programme_000(tmp_path):
+    d = tmp_path / "economie/projet-de-loi-de-reglement-2020-plr-2020/attachments"
+    head = ["exercice", "loi", "typeBudget", "ministere", "mission", "programme", "action", "sous_action",
+            "categorie", "titre", "AE EXEC", "CP EXEC"]
+    _xlsx(d / "plr2020_credits_destination_nature_xls", [
+        head,
+        [2020.0, "PLR", "BG", 7.0, "TR", 348.0, "348-11", None, 31.0, 3.0, 1.0, 1000000.0],
+        [2020.0, "PLR", "BG", None, None, None, None, None, None, None, 9.0, 748000000.0],  # ligne de total
+    ])
+    rows = [r for t, r in sources.parse_plr_attachment(d / "plr2020_credits_destination_nature_xls") if t == "depense"]
+    assert [(r["programme_code"], r["montant_meur"]) for r in rows] == [("348", 1.0)]
+    assert [sources.prog_code(v) for v in ("105.0", "", None, "0", "000", "Total", 7.0, "1234")] == \
+        ["105", None, None, None, None, None, "007", None]

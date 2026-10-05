@@ -227,12 +227,9 @@ def parse_exec_titres(path: Path) -> Iterator[Row]:
     agg: dict[tuple, float] = defaultdict(float)
     labels: dict[tuple, tuple] = {}
     for r in rows:
-        raw = str(r.get(prog) or "").strip()
-        if raw.endswith(".0"):
-            raw = raw[:-2]
-        if not raw.isdigit():
+        code = prog_code(r.get(prog))
+        if code is None:
             continue  # lignes de total, de titre ou vides
-        code = raw.zfill(3)
         if perimetre_programme(code) != "BG":
             continue
         for t, col in titres:
@@ -271,6 +268,13 @@ def _code(v) -> str:
     return s[:-2] if s.endswith(".0") else s
 
 
+def prog_code(v) -> str | None:
+    """Numéro de programme normalisé sur 3 chiffres, ou None (vide, texte, 0 :
+    lignes de total ou d'en-tête). « 105.0 » -> « 105 »."""
+    c = _code(v)
+    return c.zfill(3) if c.isdigit() and 0 < int(c) < 1000 else None
+
+
 def load_nomenclature(directory: Path) -> tuple[dict[str, str], dict[str, tuple[str, str]]]:
     """Classeur « nomenclature » joint aux PLR 2019+ : missions (MSN) et programmes (PGM)."""
     missions: dict[str, str] = {}
@@ -284,7 +288,8 @@ def load_nomenclature(directory: Path) -> tuple[dict[str, str], dict[str, tuple[
                 if r.get("type_ligne") == "MSN":
                     missions[r["code"]] = r["libelle"]
                 elif r.get("type_ligne") == "PGM":
-                    programmes[_code(r["code"]).zfill(3)] = (r["libelle"], r.get("mission", ""))
+                    if prog_code(r["code"]):
+                        programmes[prog_code(r["code"])] = (r["libelle"], r.get("mission", ""))
     return missions, programmes
 
 
@@ -331,8 +336,8 @@ def parse_destination_nature(path: Path) -> Iterator[Row]:
         agg: dict[tuple, float] = defaultdict(float)
         bad: list[dict] = []
         for r in rows:
-            code = _code(r[v["programme"]]).zfill(3)
-            if not code.isdigit() or not _is_bg(r, code):
+            code = prog_code(r[v["programme"]])
+            if code is None or not _is_bg(r, code):  # ligne de total (programme vide) ou parasite
                 continue
             e = _code(r.get(v["exercice"]))
             e = int(e) if e.isdigit() else ex
@@ -375,8 +380,8 @@ def parse_plr_export(path: Path) -> Iterator[Row]:
         col = next(h for h in headers if re.fullmatch(r"exec_cp_t2_hors_t2_\d{4}.*", h))
         _, rows = grid_rows(grid, 0)
         for r in rows:
-            code = str(r["code_programme"]).zfill(3)
-            if not _is_bg(r, code):
+            code = prog_code(r["code_programme"])
+            if code is None or not _is_bg(r, code):
                 continue
             ex = int(to_float(r["annee_rap"]))
             yield "controle", dict(exercice=ex, cle=f"programme {code}", reference=meur(r[col]) or 0.0,
@@ -654,9 +659,9 @@ def parse_plf_depenses(path: Path) -> Iterator[Row]:
         raise UnknownFormat(f"en-têtes {headers}")
     agg: dict[tuple, float] = defaultdict(float)
     for r in rows:
-        if r["typebudget"] != "BG":
+        if r["typebudget"] != "BG" or prog_code(r["programme"]) is None:
             continue
-        key = (int(r["exercice"]), r["loi"].lower(), r["libelle_mission"], str(r["programme"]).zfill(3),
+        key = (int(r["exercice"]), r["loi"].lower(), r["libelle_mission"], prog_code(r["programme"]),
                r["libelle_programme"], str(r["titre"]), str(r["categorie"]))
         agg[key] += meur(r["credit_de_paiement"]) or 0.0
     for (ex, loi, m, code, lib, t, cat), v in agg.items():
