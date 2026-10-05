@@ -326,7 +326,7 @@ Désignation des recettes;Exécution 2012;Évaluation initiale pour 2013
  D. Recettes non fiscales;14 110;14 209
  E. Prélèvements sur les recettes de l'État;74 635;76 128
   Prélèvements sur les recettes de l'État au profit des collectivités territoriales;55 584;55 693
-  Prélèvement sur les recettes de l'État au profit de l'Union européenne;19 052;20 435
+  Prélèvement sur les recettes de l’État au profit de l’Union européenne;19 052;20 435
 """
 
 
@@ -346,7 +346,7 @@ def test_recettes_nettes(tmp_path):
 
 def test_recettes_nettes_thousands_and_unknown_layout(tmp_path):
     p = write(tmp_path / "plf-2012/x_csv", "(En milliers d’euros);;Exécution 2010\n;Impôt net sur le revenu;47433070\n")
-    with pytest.raises(sources.UnknownFormat, match="lignes nettes"):
+    with pytest.raises(sources.UnknownFormat, match="PLF 2012 incomplet"):
         list(sources.parse_recettes_nettes(p))
 
 
@@ -369,3 +369,62 @@ def test_inspect_xlsx_and_pdf(tmp_path):
     assert inspect_raw.run(raw, rep) == 0
     t = rep.read_text()
     assert "feuille `Sheet`" in t and "code_programme ; exec_cp_2019" in t and "PDF, 1 pages" in t
+
+
+# --- SMB (situations mensuelles budgétaires) ---------------------------------------------
+
+SMB_HEAD = ("niveau_hierarchique;niveau_hierarchique_de_la_ligne;categorie;sous_categorie;ligne_d_information;"
+            "30_11_{y};31_12_{y}\n")
+SMB_ROWS = """0;Nul;Solde budgétaire;Solde budgétaire;Solde budgétaire;-150000000;-160000000
+1;Sous-total de niveau 1;Dépenses;Budget général;Total dépenses nettes du budget général;9000000;10000000
+2;Sous-total de niveau 2;Dépenses;Budget général;Charges de la dette de l’Etat;1000000;1500000
+2;Sous-total de niveau 2;Dépenses;Prélèvements sur recettes;PSR au profit de l'Union européenne;100000;200000
+3;Sous-total de niveau 3;Recettes;Budget général;Impôt sur le revenu;3000000;4000000
+3;Sous-total de niveau 3;Recettes;Budget général;Taxe sur la valeur ajoutée;2000000;3000000
+2;Sous-total de niveau 2;Recettes;Budget général;Total recettes non fiscales;500000;1000000
+4;Sous-total de niveau 4;Soldes;Comptes spéciaux;CCF Avances aux collectivités territoriales;1;2
+"""
+
+
+def test_smb_parser(tmp_path):
+    p = write(tmp_path / "export.csv", SMB_HEAD.format(y=2024) + SMB_ROWS, "utf-8-sig")
+    out = list(sources.parse_smb(p))
+    agg = {(r["indicateur"], r["mois"]): r["montant_meur"] for t, r in out if t == "agregat_etat"}
+    assert agg[("solde", 12)] == -160 and agg[("charge_dette", 12)] == 1.5 and agg[("depenses_nettes", 11)] == 9
+    rec = {(r["poste_code"], r["mois"]): r["montant_meur"] for t, r in out if t == "recette"}
+    assert rec == {("PSR_UE", 11): 0.1, ("PSR_UE", 12): 0.2, ("IR", 11): 3, ("IR", 12): 4, ("TVA", 11): 2,
+                   ("TVA", 12): 3, ("NF", 11): 0.5, ("NF", 12): 1}
+    assert sum(1 for t, _ in out if t == "serie") == 16  # toutes les lignes gardées en série brute
+
+
+def test_smb_priority_dedup_and_official_series(tmp_path):
+    raw = tmp_path / "raw"
+    d = raw / "economie/situations-mensuelles-budgetaires-series-longues"
+    write(d / "export.csv", SMB_HEAD.format(y=2024) + SMB_ROWS, "utf-8-sig")
+    write(d / "attachments/serie_longue_smb_dgfip_2024_xxcsv", SMB_HEAD.format(y=2024) + SMB_ROWS)
+    a = raw / "economie/plrg-2024/attachments"
+    write(a / "annexe1_etat_titre_cat_2024_csv", "Mission;Programme;Titre;Categorie;Depenses\n"
+          "Mission A;Programme A1 - 101;Titre 2;21;8000000\n"
+          "Engagements financiers de l'État;Charge - 117;Titre 4;41;1500000\n"
+          "Remboursements et dégrèvements;R&D locaux - 201;Titre 2;21;500000\n"
+          "Remboursements et dégrèvements;R&D État - 200;Titre 2;21;99000000\n")
+    write(a / "annexe1_etat_recettes_csv",
+          "Niveau hiérarchique de la ligne;Catégorie;Section;Ligne de prévision;Ligne d'exécution;LFI;LFR/LFG;"
+          "Total des prévisions;Total des recouvrements;Total des recettes**\n"
+          "2;Recettes fiscales;11 - Impôt X (total);x;;0;0;0;0;7000000\n")
+    dbp = tmp_path / "b.duckdb"
+    assert ingest.run(raw, dbp) == 0
+    con = connect(dbp, read_only=True)
+    # SMB prioritaire sur PLRG pour les recettes ; doublon export / pièce jointe éliminé
+    srcs = con.execute("SELECT DISTINCT source FROM recette").fetchall()
+    assert len(srcs) == 1 and srcs[0][0].startswith("SMB")
+    assert con.execute("SELECT count(*) FROM agregat_etat WHERE indicateur = 'solde' AND mois = 12").fetchone()[0] == 1
+    s = queries.series(con)["etat"]
+    i = s["years"].index(2024)
+    assert s["solde"][i] == -160 and "officiel" in s["solde_source"][i]
+    assert s["depenses"][i] == 10  # agrégat SMB
+    assert s["recettes_nettes"][i] == pytest.approx(4 + 3 + 1 - 0.2)
+    report = (tmp_path / "VALIDATION.md").read_text()
+    # détail : 8 + 1,5 (P117) + 0,5 (P201 gardé depuis 2023) = 10 = SMB ; P200 exclu
+    assert "| 2024 | dépenses nettes | 10 | 10 | 0.0 |" in report
+    assert "PLRG 2024 annexe1_etat_recettes" in report  # source écartée, journalisée

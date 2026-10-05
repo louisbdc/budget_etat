@@ -124,18 +124,6 @@ def test_failed_ingest_keeps_previous_db(built_db):
     connect(dbp, read_only=True).execute("SELECT count(*) FROM depense").fetchone()
 
 
-def test_pending_parser_is_reported_not_faked(tmp_path, capsys):
-    raw = tmp_path / "raw"
-    d = raw / "economie" / "situations-mensuelles-budgetaires-series-longues" / "attachments"
-    d.mkdir(parents=True)
-    (d / "x_csv").write_text("a\n1\n")
-    rc = ingest.run(raw, tmp_path / "b.duckdb", [p for p in ingest.PARSERS if p.name == "sme_series_longues"])
-    assert rc == 0
-    assert "schéma non inspecté" in capsys.readouterr().out
-    con = connect(tmp_path / "b.duckdb", read_only=True)
-    assert con.execute("SELECT count(*) FROM depense").fetchone()[0] == 0
-
-
 def test_eurostat_parser(tmp_path):
     ds = jsonstat_fixture()
     ds["id"].insert(1, "sector")

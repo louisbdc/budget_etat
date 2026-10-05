@@ -28,10 +28,12 @@ def _annual(table: str, extra: str = "") -> str:
     )"""
 
 
-# Vue « nette » du budget général : hors remboursements et dégrèvements
-# (programmes 200/201), déjà déduits des recettes fiscales nettes.
-NET_FILTER = ("coalesce(programme_code, '') NOT IN ('200', '201') "
-              "AND coalesce(mission_lib, '') NOT ILIKE 'Remboursements et dégrèvements%'")
+# Vue « nette » du budget général, alignée sur la SMB de la DGFiP : hors
+# remboursements et dégrèvements d'impôts d'État (P200) ; jusqu'en 2022, hors
+# aussi ceux d'impôts locaux (P201). Depuis 2023 (loi organique du 28/12/2021),
+# le P201 reste dans les dépenses nettes. Vérifié : PLRG 2024 = SMB 2024 au M€.
+NET_FILTER = ("NOT (coalesce(programme_code, '') = '200' "
+              "OR (coalesce(programme_code, '') = '201' AND exercice < 2023))")
 DEP_NET = _annual("depense", f"AND {NET_FILTER}")
 REC_NET = _annual("recette", "AND coalesce(sens, 'net') = 'net'")
 
@@ -70,8 +72,11 @@ def series(con: duckdb.DuckDBPyConnection) -> dict:
     agg: dict[str, dict[int, float]] = {}
     for ex, ind, v in con.execute(f"SELECT exercice, indicateur, montant_meur FROM {_annual_agregat()}").fetchall():
         agg.setdefault(ind, {})[ex] = v
-    # La charge de la dette publiée en agrégat prime sur le programme 117 (qui inclut la trésorerie).
+    # Les agrégats officiels de la SMB priment sur l'agrégation du détail : charge de
+    # la dette (titre 4, le programme 117 inclut la trésorerie) et dépenses nettes
+    # (couvrent aussi les années sans détail par programme : 2015-2017, 2019-2022…).
     charge = {**charge, **agg.get("charge_dette", {})}
+    dep = {**dep, **agg.get("depenses_nettes", {})}
     macro: dict[str, dict[int, float]] = {}
     for a, ind, v in con.execute("SELECT annee, indicateur, valeur_meur FROM macro").fetchall():
         macro.setdefault(ind, {})[a] = v
@@ -80,7 +85,11 @@ def series(con: duckdb.DuckDBPyConnection) -> dict:
     def col(d):
         return [d.get(y) for y in years]
 
-    solde = agg.get("solde") or {y: rec[y] - dep[y] for y in years if y in rec and y in dep}
+    officiel = agg.get("solde", {})
+    solde = {y: officiel.get(y, rec[y] - dep[y] if y in rec and y in dep else None) for y in years}
+    solde_source = [("solde budgétaire officiel (SMB, y c. comptes spéciaux et budgets annexes)" if y in officiel
+                     else "recettes − dépenses du budget général (calculé)" if solde[y] is not None else None)
+                    for y in years]
     pib = macro.get("pib_nominal", {})
     return {
         "etat": {
@@ -89,7 +98,7 @@ def series(con: duckdb.DuckDBPyConnection) -> dict:
             "recettes_nettes": col(rec),
             "depenses": col(dep),
             "solde": col(solde),
-            "solde_source": "agrégat publié" if agg.get("solde") else "recettes - dépenses (budget général)",
+            "solde_source": solde_source,
             "dette_etat": col(agg.get("dette_etat", {})),
             "charge_dette": col(charge),
             "pib": col(pib),

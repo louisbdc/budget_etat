@@ -387,7 +387,7 @@ RECETTES_NETTES = [
     (r"^5\.\s*autres recettes fiscales.*nettes", "fiscale", "AUTRES", "Autres recettes fiscales (nettes)"),
     (r"^d\.\s*recettes non fiscales", "non_fiscale", "NF", "Recettes non fiscales"),
     (r"au profit des collectivites", "prelevement", "PSR_COLL", "Prélèvements au profit des collectivités territoriales"),
-    (r"au profit de l.union europeenne", "prelevement", "PSR_UE", "Prélèvement au profit de l'Union européenne"),
+    (r"au profit de l.?union europeenne", "prelevement", "PSR_UE", "Prélèvement au profit de l'Union européenne"),
 ]
 RECETTES_NETTES_CONTROLES = [(r"^c\.\s*recettes fiscales nettes", "recettes fiscale"),
                              (r"^e\.\s*prelevements", "recettes prelevement")]
@@ -431,10 +431,92 @@ def parse_recettes_nettes(path: Path) -> Iterator[Row]:
             if re.search(rx, label):
                 yield "controle", dict(exercice=ex, cle=cle, reference=v * factor, source=src)
     if not {"IR", "IS", "TVA", "NF"} <= set(found):
+        labels = " ".join(_plain(" ".join(r[:col])) for r in grid)
+        if "impot net sur le revenu" in labels:
+            raise UnknownFormat("tableau PLF 2012 incomplet : ni recettes non fiscales, ni prélèvements, ni "
+                                "remboursements d'impôts locaux ; exécution 2010 non ingérée (total net impossible)")
         raise UnknownFormat(f"lignes nettes non reconnues (trouvées : {sorted(found)})")
     for code, (cat, lib, v) in found.items():
         yield "recette", dict(exercice=ex, mois=None, periode="annuel", nature="execution", categorie=cat, sens="net",
                               poste_code=code, poste_lib=lib, montant_meur=v, source=src)
+
+
+# --- SMB : situations mensuelles budgétaires (DGFiP), séries longues ----------
+
+# (motif sur la ligne d'information normalisée, indicateur agrégé, ligne de recette)
+SMB_LIGNES = [
+    (r"^solde budgetaire$", "solde", None),
+    (r"^total depenses nettes du budget general$", "depenses_nettes", None),
+    (r"^dotation des pouvoirs publics$", "depenses_titre_1", None),
+    (r"^depenses de personnel$", "depenses_titre_2", None),
+    (r"^depenses de fonctionnement$", "depenses_titre_3", None),
+    (r"^charges? de la dette de l.?etat$", "charge_dette", None),
+    (r"^depenses d.?investissement$", "depenses_titre_5", None),
+    (r"^depenses d.?intervention$", "depenses_titre_6", None),
+    (r"^depenses d.?operations financieres$", "depenses_titre_7", None),
+    (r"^total prelevements sur recettes$", "prelevements", None),
+    (r"^psr au profit des collectivites", "psr_collectivites", ("prelevement", "PSR_COLL", "Prélèvements au profit des collectivités territoriales")),
+    (r"^psr au profit de l.?union europeenne", "psr_ue", ("prelevement", "PSR_UE", "Prélèvement au profit de l'Union européenne")),
+    (r"^total recettes nettes du budget general$", "recettes_nettes_bg", None),
+    (r"^total recettes fiscales$", "recettes_fiscales_nettes", None),
+    (r"^impot sur le revenu$", None, ("fiscale", "IR", "Impôt sur le revenu (net)")),
+    (r"^impot sur les societes$", None, ("fiscale", "IS", "Impôt sur les sociétés (net)")),
+    (r"^taxe interieure de consommation sur les produits energetiques$", None, ("fiscale", "TICPE", "TICPE")),
+    (r"^taxe sur la valeur ajoutee$", None, ("fiscale", "TVA", "Taxe sur la valeur ajoutée (nette)")),
+    (r"^autres recettes fiscales$", None, ("fiscale", "AUTRES", "Autres recettes fiscales (nettes)")),
+    (r"^total recettes non fiscales$", "recettes_non_fiscales", ("non_fiscale", "NF", "Recettes non fiscales")),
+    (r"^fonds de concours", "fonds_concours", ("fonds_concours", "FDC", "Fonds de concours et attributions de produits")),
+    (r"^solde des comptes speciaux$", "solde_comptes_speciaux", None),
+    (r"^solde des budgets annexes$", "solde_budgets_annexes", None),
+    (r"^remboursements et degrevements d.?impots d.?etat$", "rd_impots_etat", None),
+    (r"^remboursements et degrevements d.?impots locaux$", "rd_impots_locaux", None),
+]
+
+
+def _smb_date(h: str) -> tuple[int, int] | None:
+    m = re.fullmatch(r"(\d{1,2})[_/.-](\d{1,2})[_/.-]((?:19|20)\d{2})", h.strip())
+    return (int(m.group(3)), int(m.group(2))) if m else None
+
+
+def parse_smb(path: Path) -> Iterator[Row]:
+    """Tableau large : une ligne par « ligne d'information », une colonne par fin de mois
+    (cumul depuis le 1er janvier, en €). Produit : agrégats mensuels (solde budgétaire
+    officiel, dépenses et recettes nettes…), recettes par grande catégorie, et la
+    série brute de chaque ligne."""
+    for _, grid in read_sheets(path):
+        hdr = find_header(grid, {"ligne_d_information"})
+        if hdr is None:
+            continue
+        raw_headers = grid[hdr]
+        cols = [(i, _smb_date(h)) for i, h in enumerate(raw_headers)]
+        cols = [(i, d) for i, d in cols if d]
+        if not cols:
+            raise UnknownFormat(f"aucune colonne de date jj_mm_aaaa : {raw_headers[:8]}")
+        li = [_norm_header(h) for h in raw_headers].index("ligne_d_information")
+        src = f"SMB DGFiP ({path.name})"
+        for row in grid[hdr + 1:]:
+            if li >= len(row) or not row[li]:
+                continue
+            label = row[li]
+            norm = _plain(label).replace("’", "'")
+            match = next(((ind, rec) for rx, ind, rec in SMB_LIGNES if re.search(rx, norm)), (None, None))
+            for i, (ex, mois) in cols:
+                v = meur(row[i]) if i < len(row) else None
+                if v is None:
+                    continue
+                yield "serie", dict(source="SMB", serie=label, titre=label, periode=f"{ex}-{mois:02d}",
+                                    valeur=v, unite="M€", puissance=0)
+                ind, rec = match
+                if ind:
+                    yield "agregat_etat", dict(exercice=ex, mois=mois, periode="cumul_mensuel", indicateur=ind,
+                                               montant_meur=v, source=src)
+                if rec:
+                    cat, code, lib = rec
+                    yield "recette", dict(exercice=ex, mois=mois, periode="cumul_mensuel", nature="execution",
+                                          categorie=cat, sens="net", poste_code=code, poste_lib=lib,
+                                          montant_meur=v, source=src)
+        return
+    raise UnknownFormat("pas de colonne « ligne d'information »")
 
 
 # --- PLF / LFI -----------------------------------------------------------------

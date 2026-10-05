@@ -96,8 +96,9 @@ PARSERS: list[Parser] = [
     Parser("plf_depenses", "economie/*depenses*destination/export.csv", sources.parse_plf_depenses),
     Parser("plf_recettes_nettes", "economie/plf-*-recettes-fiscales-nettes/attachments/*",
            sources.parse_recettes_nettes),
-    # Situations mensuelles budgétaires 2013+ : jeu repéré à la 2e inspection, pas encore vu.
-    Parser("sme_series_longues", "economie/situations-mensuelles-budgetaires-series-longues/**/*", _pending),
+    # Situations mensuelles budgétaires (2013 → mois courant) : export ODS + pièces jointes.
+    Parser("smb", "economie/situations-mensuelles-budgetaires-series-longues/export.csv", sources.parse_smb),
+    Parser("smb", "economie/situations-mensuelles-budgetaires-series-longues/attachments/*serie*", sources.parse_smb),
 ]
 
 
@@ -140,7 +141,53 @@ def write_unmatched_report(matches: list[nomenclature.Match], path: Path = NON_R
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def write_validation_report(con: duckdb.DuckDBPyConnection, path: Path) -> None:
+# Priorité des sources quand plusieurs couvrent le même exercice (1 = gardée).
+SOURCE_PRIORITY = """CASE
+    WHEN source LIKE 'SMB%' OR source LIKE 'INSEE%' OR source LIKE 'Eurostat%' THEN 1
+    WHEN source LIKE 'PLRG%' THEN 2
+    WHEN source LIKE 'PLR %' THEN 3
+    WHEN source LIKE 'data.economie%' THEN 4
+    WHEN source LIKE 'PLF%' THEN 5
+    ELSE 6 END"""
+
+# (table, colonnes définissant « la même donnée », filtre)
+DEDUP = [
+    ("depense", ["exercice"], "nature = 'execution'"),
+    ("recette", ["exercice"], "nature = 'execution'"),
+    ("agregat_etat", ["exercice", "mois", "indicateur"], "TRUE"),
+]
+
+
+def deduplicate(con: duckdb.DuckDBPyConnection) -> list[str]:
+    """Ne garde, pour chaque clé, que la source de meilleure priorité ; renvoie le
+    journal des sources écartées (avec l'écart de montant quand il est calculable)."""
+    log = []
+    for table, keys, where in DEDUP:
+        k = ", ".join(keys)
+        con.execute(f"""
+            CREATE OR REPLACE TEMP TABLE rang AS
+            SELECT {k}, source, coalesce(sum(montant_meur) FILTER (WHERE periode = 'annuel' OR mois = 12), 0) AS total,
+                   {SOURCE_PRIORITY} AS prio,
+                   row_number() OVER (PARTITION BY {k} ORDER BY {SOURCE_PRIORITY}, source) AS rn
+            FROM {table} WHERE {where} GROUP BY {k}, source""")
+        for row in con.execute(f"""
+                SELECT r.{keys[0]}, {" || ' ' || ".join(f'r.{x}::VARCHAR' for x in keys[1:]) or "NULL"}, r.source, r.total,
+                       g.source, g.total
+                FROM rang r JOIN rang g USING ({k}) WHERE r.rn > 1 AND g.rn = 1
+                ORDER BY 1, 2""").fetchall():
+            ex, sub, src, tot, keep, ktot = row
+            if table == "agregat_etat" and abs(tot - ktot) < 0.01:
+                continue  # doublon identique (ex. export et pièce jointe SMB) : rien à signaler
+            log.append(f"| {table} | {ex} | {sub or ''} | {src} | {keep} | {tot - ktot:,.2f} |")
+        con.execute(f"""
+            DELETE FROM {table} t USING rang r
+            WHERE {where.replace("nature", "t.nature")} AND r.rn > 1 AND t.source = r.source
+              AND {' AND '.join(f't.{x} = r.{x}' for x in keys)}""")
+    con.execute("CREATE OR REPLACE TABLE serie AS SELECT DISTINCT * FROM serie")
+    return log
+
+
+def write_validation_report(con: duckdb.DuckDBPyConnection, path: Path, dedup_log: list[str] | None = None) -> None:
     """Contrôles croisés (montants publiés vs agrégation des tables) et couverture."""
     from budget_etat.queries import NET_FILTER
 
@@ -152,19 +199,41 @@ def write_validation_report(con: duckdb.DuckDBPyConnection, path: Path) -> None:
         dep AS (SELECT exercice, 'programme ' || programme_code AS cle, sum(montant_meur) AS v
                 FROM depense WHERE nature = 'execution' GROUP BY 1, 2),
         rec AS (SELECT exercice, 'recettes ' || categorie AS cle, sum(montant_meur) AS v
-                FROM recette WHERE nature = 'execution' GROUP BY 1, 2)
+                FROM recette WHERE nature = 'execution' AND (periode = 'annuel' OR mois = 12) GROUP BY 1, 2)
         SELECT r.exercice, r.cle, r.reference, coalesce(d.v, c.v) AS obtenu, r.source
         FROM ref r LEFT JOIN dep d USING (exercice, cle) LEFT JOIN rec c USING (exercice, cle)
         ORDER BY abs(coalesce(coalesce(d.v, c.v), 0) - r.reference) DESC, r.cle""").fetchall()
     n_ok = 0
     for ex, cle, ref, got, src in rows:
         ecart = None if got is None else got - ref
-        if ecart is not None and abs(ecart) < 0.01:
-            n_ok += 1
+        if (ecart is not None and abs(ecart) < 0.01) or (got is None and abs(ref) < 0.01):
+            n_ok += 1  # exact, ou programme sans dépense absent du détail
             continue
         lines.append(f"| {ex} | {cle} | {ref:,.2f} | {'–' if got is None else f'{got:,.2f}'} | "
                      f"{'absent' if ecart is None else f'{ecart:,.2f}'} | {src} |")
     lines += ["", f"{n_ok} contrôle(s) exact(s) à 0,01 M€ près (non listés), {len(rows) - n_ok} écart(s) listé(s).", ""]
+    lines += ["## Rapprochement SMB (agrégats officiels) / détail par programme et par impôt", "",
+              "Pour les exercices couverts par les deux. Écart = détail − SMB (M€).", "",
+              "| exercice | grandeur | SMB | détail | écart |", "|---|---|---:|---:|---:|"]
+    for ex, nom, smb, det in con.execute(f"""
+            WITH a AS (SELECT exercice, indicateur, montant_meur FROM agregat_etat WHERE mois = 12),
+            d AS (SELECT exercice, sum(montant_meur) v FROM depense
+                  WHERE nature = 'execution' AND {NET_FILTER} GROUP BY 1),
+            t4 AS (SELECT exercice, sum(montant_meur) v FROM depense
+                   WHERE nature = 'execution' AND titre_code = '4' GROUP BY 1)
+            SELECT a.exercice, 'dépenses nettes', a.montant_meur, d.v FROM a JOIN d USING (exercice)
+              WHERE a.indicateur = 'depenses_nettes'
+            UNION ALL
+            SELECT a.exercice, 'charge de la dette (titre 4)', a.montant_meur, t4.v FROM a JOIN t4 USING (exercice)
+              WHERE a.indicateur = 'charge_dette'
+            ORDER BY 1, 2""").fetchall():
+        lines.append(f"| {ex} | {nom} | {smb:,.0f} | {det:,.0f} | {det - smb:,.1f} |")
+    lines += ["", "## Sources écartées (doublons)", "",
+              "Quand plusieurs sources couvrent la même clé, seule la plus prioritaire est gardée "
+              "(SMB/INSEE/Eurostat > PLRG > PLR > exécution data.economie > PLF).", "",
+              "| table | exercice | mois / indicateur | source écartée | source gardée | écart |",
+              "|---|---|---|---|---|---:|"]
+    lines += (dedup_log or ["| – | | | aucun doublon | | |"]) + [""]
     lines += ["## Couverture par exercice (exécution)", "",
               "Dépenses nettes = budget général hors remboursements et dégrèvements (programmes 200/201).", "",
               "Une année alimentée par plus d'une source de dépenses est signalée ⚠ (risque de double compte).", "",
@@ -176,12 +245,12 @@ def write_validation_report(con: duckdb.DuckDBPyConnection, path: Path) -> None:
                           sum(CASE WHEN titre_code = '4' THEN montant_meur END) t4
                    FROM depense WHERE nature = 'execution' AND {NET_FILTER} GROUP BY 1),
         r AS (SELECT exercice, sum(CASE WHEN categorie = 'prelevement' THEN -montant_meur ELSE montant_meur END) rec
-              FROM recette WHERE nature = 'execution' GROUP BY 1),
+              FROM recette WHERE nature = 'execution' AND (periode = 'annuel' OR mois = 12) GROUP BY 1),
         a AS (SELECT exercice, max(montant_meur) FILTER (WHERE indicateur = 'dette_etat' AND mois = 12) dette
               FROM agregat_etat GROUP BY 1),
         m AS (SELECT annee AS exercice, max(valeur_meur) FILTER (WHERE indicateur = 'pib_nominal') pib
               FROM macro GROUP BY 1),
-        y AS (SELECT exercice FROM d UNION SELECT exercice FROM r UNION SELECT exercice FROM a)
+        y AS (SELECT exercice FROM d UNION SELECT exercice FROM r UNION SELECT exercice FROM a WHERE dette IS NOT NULL)
         SELECT y.exercice, np, dep, t4, rec, dette, pib, ns FROM y LEFT JOIN d USING (exercice)
         LEFT JOIN r USING (exercice) LEFT JOIN a USING (exercice) LEFT JOIN m USING (exercice)
         ORDER BY 1""").fetchall()
@@ -228,7 +297,8 @@ def run(raw_dir: Path = RAW_DIR, db_path: Path = db.DB_PATH, parsers: list[Parse
         matches = reconcile_nomenclature(con)
         if matches:
             write_unmatched_report(matches, db_path.parent / NON_RAPPROCHES.name)
-        write_validation_report(con, db_path.parent / VALIDATION)
+        dedup_log = deduplicate(con)
+        write_validation_report(con, db_path.parent / VALIDATION, dedup_log)
         con.close()
         tmp.replace(db_path)
     finally:

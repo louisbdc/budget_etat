@@ -14,6 +14,7 @@ CHARGE_DETTE_PROGRAMMES = {"117"}
 RULES = [
     # (côté, champ testé, regex, niveau, explication)
     ("depense", "programme_code", r"^117$", "fixe", "Charge de la dette : dépend du stock et des taux"),
+    ("depense", "programme_code", r"^20[01]$", "fixe", "Remboursements et dégrèvements : suivent les impôts"),
     ("depense", "lib", r"charge de la dette", "fixe", "Charge de la dette : dépend du stock et des taux"),
     ("depense", "lib", r"pension", "partiel", "Pensions : droits acquis, ajustement lent"),
     ("depense", "titre_code", r"^2$", "partiel", "Titre 2 (personnel) : effectifs et grilles, inertie forte"),

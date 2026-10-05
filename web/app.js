@@ -80,6 +80,11 @@ function renderEvolution() {
     lineChart("c-recdep", e.years, [{ name: "Recettes nettes", data: conv(e.recettes_nettes) },
                                      { name: "Dépenses", data: conv(e.depenses) }], { unit });
     lineChart("c-solde", e.years, [{ name: "Solde", data: conv(e.solde), zeroLine: true }], { unit });
+    const calc = e.years.filter((y, i) => (e.solde_source[i] || "").includes("calculé"));
+    const off = "Solde budgétaire officiel de la DGFiP (SMB, y compris comptes spéciaux et budgets annexes)";
+    const cal = "calculé (recettes − dépenses du budget général)";
+    $("#solde-note").textContent = !calc.length ? `${off}.` : calc.length === e.years.filter((y, i) => e.solde[i] != null).length
+      ? `Solde ${cal}.` : `${off} ; ${cal} pour : ${calc.join(", ")}.`;
     lineChart("c-dette", e.years, [{ name: "Dette de l'État", data: conv(e.dette_etat) }], { unit, zero: true });
     lineChart("c-charge", e.years, [{ name: "Charge de la dette", data: conv(e.charge_dette) }], { unit, zero: true });
   }

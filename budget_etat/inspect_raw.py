@@ -182,8 +182,13 @@ def _profile_bytes(con, name: str, data: bytes, tmpdir: Path) -> list[str]:
         return describe_json(obj)
     if suffix in (".docx", ".odt", ".ods"):
         return [f"(format {suffix} non profilé)"]
-    enc = _open_csv(con, data, tmpdir)
-    return [f"encodage : {enc}"] + profile_table(con)
+    try:
+        enc = _open_csv(con, data, tmpdir)
+        return [f"encodage : {enc}"] + profile_table(con)
+    except duckdb.Error as e:
+        # Dialecte non détecté par DuckDB : lecture Python brute des premières lignes.
+        out = [f"(profilage DuckDB impossible : {str(e).splitlines()[0][:200]})"]
+        return out + describe_workbook(data, tmpdir)
 
 
 def run(raw_dir: Path = RAW_DIR, report: Path = REPORT) -> int:
