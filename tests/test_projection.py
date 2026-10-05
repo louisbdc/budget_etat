@@ -210,3 +210,56 @@ def test_measure_on_all_lines():
     y1 = project(base(), Assumptions(horizon=1, **FLAT), [m])[1]
     # 200 de dépenses (a 60, b 40, c 100) : -20 réparti au prorata
     assert y1.spending_by_line == pytest.approx({"a": 54, "b": 36, "c": 90})
+
+
+# --- solveur d'effort ------------------------------------------------------------------
+
+from budget_etat.projection import solve_effort  # noqa: E402
+
+
+def test_solve_balanced_budget_matches_hand_computation():
+    # Base : déficit 10 (200 + 10 - 200), taux constant 2 %, PIB/dépenses figés.
+    # Équilibre en 2001 avec effort tout en dépenses : 200 - E + 0,02·500 - 200 ≤ 0  =>  E = 10.
+    r = solve_effort(base(), Assumptions(horizon=3, **FLAT), "solde_equilibre", annee=2001,
+                     part_depenses=1.0, debut=2001, tol=0.001)
+    assert r.atteignable and r.effort_meur == pytest.approx(10, abs=0.01)
+    assert r.valeur_atteinte <= 0
+    assert [m.side for m in r.measures] == ["spending"]
+
+
+def test_solve_is_minimal_and_split_between_levers():
+    r = solve_effort(base(), Assumptions(horizon=3, **FLAT), "solde_equilibre", annee=2001,
+                     part_depenses=0.5, debut=2001, tol=0.001)
+    assert r.effort_meur == pytest.approx(10, abs=0.01)
+    sp, rv = r.measures
+    assert sp.value == pytest.approx(-5, abs=0.01) and rv.value == pytest.approx(5, abs=0.01)
+    # un effort un peu plus faible ne suffit pas
+    from budget_etat.projection import effort_measures
+    res = project(base(), Assumptions(horizon=3, **FLAT), effort_measures(r.effort_meur - 0.1, 0.5, 2001, 1))
+    assert res[1].deficit > 0
+
+
+def test_solve_ratio_objectives():
+    a = Assumptions(horizon=5, **FLAT)  # PIB figé : le ratio monte avec la dette sans effort
+    stop = solve_effort(base(), a, "ratio_baisse", annee=2005, debut=2001, tol=0.01)
+    res = stop.results
+    assert stop.atteignable and res[5].debt_to_gdp <= res[4].debt_to_gdp + 1e-9
+    back = solve_effort(base(), a, "ratio_base", annee=2005, debut=2001, tol=0.01)
+    assert back.valeur_atteinte <= 0.5 + 1e-9 and back.effort_meur >= stop.effort_meur - 0.01
+    tgt = solve_effort(base(), a, "ratio_cible", cible=0.45, annee=2005, debut=2001, tol=0.01)
+    assert tgt.effort_meur > back.effort_meur and tgt.valeur_atteinte <= 0.45 + 1e-9
+
+
+def test_solve_zero_effort_when_already_met_and_unreachable_flagged():
+    b = base(revenue=[Line("y", 300.0)])  # excédent
+    assert solve_effort(b, Assumptions(horizon=2, **FLAT), "solde_equilibre", annee=2002, debut=2001).effort_meur == 0
+    r = solve_effort(base(), Assumptions(horizon=2, **FLAT), "ratio_cible", cible=0.0, annee=2002, debut=2001,
+                     max_effort=50)
+    assert not r.atteignable
+
+
+def test_solve_rejects_bad_inputs():
+    with pytest.raises(ValueError):
+        solve_effort(base(), Assumptions(horizon=2, **FLAT), "ratio_cible", annee=2002, debut=2001)
+    with pytest.raises(ValueError):
+        solve_effort(base(), Assumptions(horizon=2, **FLAT), "solde_equilibre", annee=2010, debut=2001)

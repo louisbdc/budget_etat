@@ -237,3 +237,25 @@ def test_inspect_profiles_csv_and_json(tmp_path):
     assert inspect_raw.run(raw, report) == 0
     txt = report.read_text()
     assert "`Mission`" in txt and "2 lignes" in txt and "[2 × int]" in txt
+
+
+def test_api_solve(built_db, tmp_path):
+    _, dbp, _ = built_db
+    client = TestClient(create_app(dbp, tmp_path / "sc"))
+    b = client.get("/api/sim/base").json()
+    base = {"year": b["exercice"], "gdp": b["gdp"], "debt": b["debt"], "interest": b["interest"],
+            "spending": [{"key": l["key"], "amount": l["amount"], "group": l["group"]} for l in b["spending"]],
+            "revenue": [{"key": l["key"], "amount": l["amount"], "group": l["group"]} for l in b["revenue"]]}
+    body = {"base": base, "assumptions": {"horizon": 6}, "objectif": "solde_equilibre", "annee": 2005,
+            "part_depenses": 0.5, "debut": 2002, "montee": 2}
+    r = client.post("/api/sim/solve", json=body)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["atteignable"] and out["effort_meur"] > 0 and out["valeur_atteinte"] <= 0
+    assert {m["side"] for m in out["measures"]} == {"spending", "revenue"}
+    assert all(m["target"] == "*" for m in out["measures"])
+    # rejouer les mesures renvoyées donne le même résultat
+    run = client.post("/api/sim/run", json={"base": base, "assumptions": {"horizon": 6}, "measures": out["measures"]}).json()
+    assert run["scenario"][4]["deficit"] == pytest.approx(out["scenario"][4]["deficit"])
+    assert client.post("/api/sim/solve", json={**body, "objectif": "ratio_cible"}).status_code == 422
+    assert client.post("/api/sim/solve", json={**body, "objectif": "n_importe"}).status_code == 422

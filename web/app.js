@@ -12,6 +12,8 @@ const fmt = (v, d = 1) => (v == null || Number.isNaN(v) ? "–" :
 // Nombre de décimales adapté à l'ordre de grandeur (graduations d'axes).
 const tick = (v) => fmt(v, Math.abs(v) >= 100 || v === 0 ? 0 : Math.abs(v) >= 1 ? 1 : 2);
 const md = (meur) => (meur == null ? null : meur / 1000);
+// Montant lisible : Md€ au-delà de 1 Md€, sinon M€.
+const montant = (meur) => (Math.abs(meur) >= 1000 ? `${fmt(meur / 1000)} Md€` : `${fmt(meur, 0)} M€`);
 const el = (tag, attrs = {}, ...kids) => {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -512,6 +514,53 @@ $("#sc-del").addEventListener("click", async () => {
   if (n && confirm(`Supprimer « ${n} » ?`)) { await api(`/api/scenarios/${encodeURIComponent(n)}`, { method: "DELETE" }); refreshScenarioList(); }
 });
 
+// --- objectif dette (solveur) ----------------------------------------------------
+const OBJ_LIB = {
+  ratio_baisse: (a) => `le ratio dette/PIB cesse de monter en ${a}`,
+  ratio_cible: (a, c) => `dette/PIB ramenée à ${fmt(c, 0)} % en ${a}`,
+  ratio_base: (a) => `dette/PIB revenue au niveau de ${BASE.exercice} en ${a}`,
+  solde_equilibre: (a) => `budget de l'État à l'équilibre en ${a}`,
+};
+function partTxt() {
+  const p = num("#obj-part");
+  $("#obj-part-txt").textContent = `${p} % baisses de dépenses / ${100 - p} % hausses de recettes`;
+}
+$("#obj-part").addEventListener("input", partTxt);
+$("#obj-type").addEventListener("change", () => { $("#obj-cible-l").hidden = $("#obj-type").value !== "ratio_cible"; });
+$("#obj-run").addEventListener("click", async () => {
+  const req = currentRequest();
+  if (req.base.gdp == null || req.base.debt == null || req.base.interest == null || !req.base.spending.length) {
+    $("#obj-result").replaceChildren(el("p", { class: "error" }, "Année de base incomplète : impossible de calculer."));
+    return;
+  }
+  const type = $("#obj-type").value, annee = num("#obj-annee"), cible = num("#obj-cible");
+  const body = { base: req.base, assumptions: req.assumptions, objectif: type, annee, cible: type === "ratio_cible" ? cible / 100 : null,
+                 part_depenses: num("#obj-part") / 100, debut: num("#obj-debut"), montee: num("#obj-montee") };
+  try {
+    const r = await api("/api/sim/solve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const dep = BASE.spending.reduce((t, l) => t + l.amount, 0);
+    const objLib = OBJ_LIB[type](annee, cible);
+    const hit = r.scenario.find((x) => x.year === annee);
+    const lib = { spending: "Effort calculé : baisse de toutes les dépenses (au prorata)",
+                  revenue: "Effort calculé : hausse de toutes les recettes (au prorata)" };
+    measures.splice(0, measures.length, ...r.measures.map((m) => ({ ...m, value: Math.round(m.value * 10) / 10,
+      libelle: lib[m.side], chiffrage: "utilisateur",
+      note: `Calculé pour : ${objLib}. Montant en régime de croisière, atteint en ${m.start_year + m.ramp_years - 1}.` })));
+    renderMeasures();
+    $("#sc-name").value = `Objectif : ${objLib}`;
+    $("#obj-result").replaceChildren(
+      r.effort_meur === 0 ? el("p", {}, `Objectif déjà atteint sans mesure (${objLib}).`) :
+      el("p", { class: r.atteignable ? "result" : "error" },
+        r.atteignable ? "Effort nécessaire : " : "Objectif hors de portée même avec un effort égal à un an de budget : ",
+        el("strong", {}, `${montant(r.effort_meur)} par an`),
+        ` en régime de croisière (${fmt(r.effort_meur / req.base.gdp * 100, 2)} % du PIB ${BASE.exercice}, `,
+        `${fmt(r.effort_meur / dep * 100)} % des dépenses hors intérêts), atteint en ${num("#obj-debut") + num("#obj-montee") - 1}. `,
+        `En ${annee} : déficit ${montant(hit.deficit)} (${fmt(hit.deficit_to_gdp * 100)} % du PIB), dette/PIB ${fmt(hit.debt_to_gdp * 100)} %.`),
+      el("p", { class: "note" }, "Dépend fortement des hypothèses de gauche (croissance, taux, tendance des dépenses) : les faire varier pour voir la sensibilité."));
+    await runSim();
+  } catch (e) { $("#obj-result").replaceChildren(el("p", { class: "error" }, e.message)); }
+});
+
 // --- données ------------------------------------------------------------------
 function renderStatus() {
   const c = STATUS.counts;
@@ -542,6 +591,7 @@ async function init() {
   renderSankey();
   renderDrill();
   renderBaseForm();
+  if (BASE.exercice) { $("#obj-annee").value = BASE.exercice + 6; $("#obj-debut").value = BASE.exercice + 2; }
   renderMeasures();
   refreshScenarioList();
 }

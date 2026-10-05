@@ -78,6 +78,27 @@
         <p class="note">Valeurs par défaut indicatives, à ajuster : aucune n'est tirée des données.</p>
       </aside>
       <div>
+        <details class="objectif" id="obj-panel" open>
+          <summary><strong>Objectif dette</strong> : calculer l'effort nécessaire</summary>
+          <div class="obj-grid">
+            <label>Objectif
+              <select id="obj-type">
+                <option value="ratio_baisse">Le ratio dette/PIB cesse de monter</option>
+                <option value="ratio_cible">Ramener la dette/PIB à un niveau cible</option>
+                <option value="ratio_base">Revenir au ratio dette/PIB de l'année de base</option>
+                <option value="solde_equilibre">Budget de l'État à l'équilibre (la dette cesse de croître en euros)</option>
+              </select></label>
+            <label>en <input type="number" id="obj-annee" value="2031" step="1"></label>
+            <label id="obj-cible-l" hidden>cible <input type="number" id="obj-cible" value="100" step="1"> % du PIB</label>
+            <label>Effort : <span id="obj-part-txt">50 % baisses de dépenses / 50 % hausses de recettes</span>
+              <input type="range" id="obj-part" min="0" max="100" step="10" value="50"></label>
+            <label>à partir de <input type="number" id="obj-debut" value="2027" step="1"></label>
+            <label>montée en charge <input type="number" id="obj-montee" value="5" min="1" step="1"> ans</label>
+            <button id="obj-run" class="primary">Calculer l'effort</button>
+          </div>
+          <p class="note">L'effort est réparti au prorata sur toutes les dépenses (hors charge de la dette) et sur toutes les recettes : c'est un ordre de grandeur, pas un choix de mesures. Il remplace les mesures ci-dessous, que l'on peut ensuite cibler ligne par ligne. Sans multiplicateur, 1 € d'économie et 1 € d'impôt ont le même effet sur la dette.</p>
+          <div id="obj-result"></div>
+        </details>
         <div class="toolbar">
           <h3 style="margin:0">Mesures</h3>
           <span class="spacer"></span>

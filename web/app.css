@@ -107,3 +107,11 @@ button.link { border: none; background: none; color: var(--series-1); padding: 0
 .chip .swatch { width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--border); background: transparent; }
 .chip.on { border-color: var(--text-secondary); background: var(--grid); font-weight: 600; }
 .chip:disabled { opacity: 0.45; cursor: not-allowed; }
+details.objectif { margin: 0 0 12px; padding: 10px 12px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; }
+details.objectif summary { cursor: pointer; }
+.obj-grid { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 10px; }
+.obj-grid label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.obj-grid input[type=number] { width: 80px; }
+.obj-grid input[type=range] { width: 160px; }
+p.result { font-size: 14px; }
+.obj-grid label[hidden] { display: none; }

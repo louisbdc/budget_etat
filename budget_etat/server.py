@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from budget_etat import db, programmes as prog, queries
 from budget_etat.fetch import ROOT
-from budget_etat.projection import Assumptions, BaseYear, Line, Measure, compare, project
+from budget_etat.projection import Assumptions, BaseYear, Line, Measure, compare, project, solve_effort
 
 WEB = ROOT / "web"
 SCENARIOS = ROOT / "data" / "scenarios"
@@ -73,6 +73,22 @@ def create_app(db_path: Path = db.DB_PATH, scenarios_dir: Path = SCENARIOS,
             raise HTTPException(422, str(e)) from e
         return {"perimetre": queries.PERIMETRE_ETAT, "reference": [_row(r) for r in ref],
                 "scenario": [_row(r) for r in sc], "diff": compare(ref, sc)}
+
+    @app.post("/api/sim/solve")
+    def sim_solve(req: SolveRequest):
+        """Effort annuel minimal (réparti dépenses / recettes) pour atteindre un objectif de dette."""
+        try:
+            base = req.base.to_model()
+            a = Assumptions(**req.assumptions.model_dump())
+            r = solve_effort(base, a, req.objectif, annee=req.annee, cible=req.cible, part_depenses=req.part_depenses,
+                             debut=req.debut, montee=req.montee)
+            ref = project(base, a)
+        except (KeyError, ValueError, ZeroDivisionError) as e:
+            raise HTTPException(422, str(e)) from e
+        return {"effort_meur": r.effort_meur, "atteignable": r.atteignable, "valeur_atteinte": r.valeur_atteinte,
+                "measures": [m.__dict__ for m in r.measures], "perimetre": queries.PERIMETRE_ETAT,
+                "reference": [_row(x) for x in ref], "scenario": [_row(x) for x in r.results],
+                "diff": compare(ref, r.results)}
 
     @app.get("/api/programmes")
     def list_programmes():
@@ -183,6 +199,17 @@ class SimRequest(BaseModel):
     base: BaseIn
     assumptions: AssumptionsIn = AssumptionsIn()
     measures: list[MeasureIn] = []
+
+
+class SolveRequest(BaseModel):
+    base: BaseIn
+    assumptions: AssumptionsIn = AssumptionsIn()
+    objectif: str = Field(pattern="^(ratio_baisse|ratio_base|ratio_cible|solde_equilibre)$")
+    annee: int
+    cible: float | None = Field(None, gt=0, lt=5)  # fraction du PIB (0,85 = 85 %)
+    part_depenses: float = Field(0.5, ge=0, le=1)
+    debut: int
+    montee: int = Field(1, ge=1)
 
 
 def serve(host: str = "127.0.0.1", port: int = 8000) -> None:

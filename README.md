@@ -182,6 +182,18 @@ Notations pour l'année *t* (année de base *t = 0*, montants en M€ courants).
 
 Les hypothèses par défaut de l'interface (croissance 2,5 %, taux 3 %, ρ 12 %, tendance des dépenses 2 %, élasticité 1, multiplicateurs 0,5 / 0,3) sont **indicatives** et ne viennent pas des données. À ajuster.
 
+## Objectif dette (solveur)
+
+Le panneau « Objectif dette » du simulateur calcule le **plus petit effort annuel** E (M€, en régime de croisière) qui atteint un objectif à une année donnée. Objectifs possibles :
+- `ratio_baisse` : le ratio dette/PIB cesse de monter (ratio N ≤ ratio N−1) ;
+- `ratio_cible` : dette/PIB ≤ cible ;
+- `ratio_base` : retour au ratio de l'année de base ;
+- `solde_equilibre` : déficit de l'État ≤ 0, donc la dette cesse de croître en euros.
+
+L'effort est ventilé en `p·E` de baisse de **toutes** les dépenses hors charge de la dette et `(1−p)·E` de hausse de **toutes** les recettes, au prorata des lignes (cible `*`), avec début et montée en charge (`projection.solve_effort`, recherche par dichotomie). L'indicateur décroît avec l'effort, ce qui garantit la convergence. C'est un ordre de grandeur de l'effort global, pas un choix de mesures : le résultat est chargé comme mesures modifiables.
+
+Sans multiplicateur, la répartition dépenses/recettes ne change rien au résultat : 1 € d'économie et 1 € d'impôt ont le même effet sur le solde. Avec le multiplicateur, elle compte, selon les multiplicateurs choisis.
+
 ## Limites du modèle
 
 - Modèle comptable annuel, sans bouclage macro complet. Le multiplicateur est un simple effet de niveau, sans persistance.

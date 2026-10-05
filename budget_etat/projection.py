@@ -274,3 +274,84 @@ def compare(reference: list[YearResult], scenario: list[YearResult]) -> list[dic
             }
         )
     return out
+
+
+# --- Recherche de l'effort nécessaire pour atteindre un objectif de dette ----------
+
+Objectif = Literal["ratio_baisse", "ratio_cible", "ratio_base", "solde_equilibre"]
+
+
+@dataclass(frozen=True)
+class EffortResult:
+    effort_meur: float  # effort annuel en régime de croisière (M€ courants), dépenses + recettes
+    atteignable: bool
+    measures: list[Measure]
+    results: list[YearResult]
+    valeur_atteinte: float  # valeur de l'indicateur visé à l'année cible
+
+
+def effort_measures(effort: float, part_depenses: float, debut: int, montee: int) -> list[Measure]:
+    """Effort réparti « au prorata » : baisse de toutes les dépenses et hausse de toutes
+    les recettes (cible « * »), selon la part donnée aux dépenses."""
+    out = []
+    if part_depenses > 0:
+        out.append(Measure("spending", "*", "meur", -effort * part_depenses, debut, montee))
+    if part_depenses < 1:
+        out.append(Measure("revenue", "*", "meur", effort * (1 - part_depenses), debut, montee))
+    return out
+
+
+def _indicateur(res: list[YearResult], objectif: str, annee: int) -> float:
+    """Valeur à ramener sous le seuil : déficit, ratio, ou hausse du ratio sur un an."""
+    i = next(i for i, r in enumerate(res) if r.year == annee)
+    if objectif == "solde_equilibre":
+        return res[i].deficit
+    if objectif == "ratio_baisse":
+        return res[i].debt_to_gdp - res[i - 1].debt_to_gdp
+    return res[i].debt_to_gdp
+
+
+def solve_effort(base: BaseYear, a: Assumptions, objectif: Objectif, *, annee: int, part_depenses: float = 0.5,
+                 debut: int, montee: int = 1, cible: float | None = None, max_effort: float | None = None,
+                 tol: float = 1.0) -> EffortResult:
+    """Plus petit effort annuel (M€, en régime de croisière) qui atteint l'objectif à `annee` :
+
+    - ratio_baisse : le ratio dette/PIB cesse de monter à `annee` (ratio N ≤ ratio N-1) ;
+    - ratio_base : dette/PIB à `annee` revenu au niveau de l'année de base ;
+    - ratio_cible : dette/PIB à `annee` ≤ `cible` (fraction, ex. 0.80) ;
+    - solde_equilibre : déficit de l'État à `annee` ≤ 0 (la dette cesse de croître en euros).
+
+    L'indicateur décroît avec l'effort (même avec le multiplicateur, tant que celui-ci
+    reste < 1/élasticité) : recherche par dichotomie à `tol` M€ près.
+    """
+    if not 0 <= part_depenses <= 1:
+        raise ValueError("part_depenses doit être entre 0 et 1")
+    if annee > base.year + a.horizon or annee < debut or annee <= base.year:
+        raise ValueError("l'année cible doit être dans l'horizon et après le début des mesures")
+    seuil = {"ratio_baisse": 0.0, "ratio_base": base.debt / base.gdp, "ratio_cible": cible,
+             "solde_equilibre": 0.0}[objectif]
+    if seuil is None:
+        raise ValueError("objectif ratio_cible : préciser la cible")
+
+    def run(e: float) -> list[YearResult]:
+        return project(base, a, effort_measures(e, part_depenses, debut, montee))
+
+    hi = max_effort if max_effort is not None else sum(l.amount for l in base.spending) + sum(
+        l.amount for l in base.revenue)  # borne haute : l'équivalent d'une année de budget
+    if _indicateur(run(0.0), objectif, annee) <= seuil:
+        res = run(0.0)
+        return EffortResult(0.0, True, [], res, _indicateur(res, objectif, annee))
+    if _indicateur(run(hi), objectif, annee) > seuil:
+        res = run(hi)
+        return EffortResult(hi, False, effort_measures(hi, part_depenses, debut, montee), res,
+                            _indicateur(res, objectif, annee))
+    lo = 0.0
+    while hi - lo > tol:
+        mid = (lo + hi) / 2
+        if _indicateur(run(mid), objectif, annee) <= seuil:
+            hi = mid
+        else:
+            lo = mid
+    res = run(hi)
+    return EffortResult(hi, True, effort_measures(hi, part_depenses, debut, montee), res,
+                        _indicateur(res, objectif, annee))
