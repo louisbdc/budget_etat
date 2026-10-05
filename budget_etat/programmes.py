@@ -76,7 +76,7 @@ def lister(directory: Path = PROGRAMMES_DIR) -> list[dict]:
         try:
             p = charger(f.stem, directory)
             out.append({"id": p["id"], "nom": p["nom"], "porteur": p["porteur"], "nb_mesures": len(p["mesures"]),
-                        "nb_non_representees": len(p["non_representees"]),
+                        "nb_non_representees": len(p["non_representees"]), "election": p.get("election"),
                         "sans_source": sum(1 for m in p["mesures"] if m["chiffrage"] == "utilisateur"),
                         "statut": p.get("statut"), "erreur": None})
         except (ProgrammeInvalide, json.JSONDecodeError) as e:

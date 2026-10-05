@@ -294,13 +294,13 @@ async function runSim() {
   try {
     const main = await api("/api/sim/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(req) });
     const others = [];
-    for (const name of [...$("#sc-compare").selectedOptions].map((o) => o.value)) {
+    for (const name of compareSel) {
       let body, label = name;
       if (name.startsWith("prog:")) {
         // Programme : ses mesures résolues, avec les hypothèses COURANTES (identiques pour tous).
         const r = await loadProgramme(name.slice(5));
         body = { base: req.base, assumptions: req.assumptions, measures: r.mesures.filter((m) => m.target) };
-        label = `${r.programme.nom} — ${r.programme.porteur}`;
+        label = progLabel(r.programme);
       } else {
         // Scénario sauvegardé : rejoué sur la base courante, avec les hypothèses courantes.
         const sc = await api(`/api/scenarios/${encodeURIComponent(name)}`);
@@ -310,6 +310,7 @@ async function runSim() {
         body: JSON.stringify(body) });
       others.push({ name: label, res: r });
     }
+    hasRun = true;
     renderSim(main, others);
   } catch (e) { $("#sim-error").textContent = e.message; $("#sim-error").hidden = false; }
 }
@@ -415,19 +416,57 @@ function renderCompareTable(main, others, name) {
 }
 
 let PROGRAMMES = [];
+const MAX_COMPARE = 4;  // palette catégorielle : 1 couleur pour le scénario courant + 4
+const compareSel = [];  // valeurs sélectionnées, dans l'ordre de sélection (= ordre des couleurs)
+let hasRun = false;
+const yearOf = (p) => ((p.election || "").match(/\d{4}/) || [""])[0];
+const progLabel = (p) => `${p.porteur}${yearOf(p) ? ` · ${yearOf(p)}` : ""}`;
 async function refreshScenarioList() {
   const [names, progs] = await Promise.all([api("/api/scenarios"), api("/api/programmes")]);
   PROGRAMMES = progs;
   $("#sc-list").replaceChildren(el("option", { value: "" }, "Charger…"), ...names.map((n) => el("option", { value: n }, n)));
   $("#prog-list").replaceChildren(el("option", { value: "" }, progs.length ? "—" : "aucun (data/programmes/*.json)"),
     ...progs.map((p) => el("option", { value: p.id, disabled: p.erreur ? "" : null },
-      p.erreur ? `⚠ ${p.id} (invalide)` : `${p.nom} — ${p.porteur} (${p.nb_mesures} mesures)`)));
-  $("#sc-compare").replaceChildren(
-    ...names.map((n) => el("option", { value: n }, `Scénario : ${n}`)),
-    ...progs.filter((p) => !p.erreur).map((p) => el("option", { value: `prog:${p.id}` }, `Programme : ${p.nom} — ${p.porteur}`)));
+      p.erreur ? `⚠ ${p.id} (invalide)` : `${progLabel(p)} — ${p.nb_mesures ? `${p.nb_mesures} mesure(s) simulée(s)` : "aucune mesure simulable"}`)));
+  SCENARIOS = names;
+  renderChips();
   const bad = progs.filter((p) => p.erreur);
   if (bad.length) $("#prog-info").textContent = `Programme(s) invalide(s) : ${bad.map((p) => p.erreur).join(" | ")}`;
 }
+let SCENARIOS = [];
+function chipItems() {
+  return [
+    ...PROGRAMMES.filter((p) => !p.erreur).map((p) => ({ value: `prog:${p.id}`, group: "Programmes", label: progLabel(p),
+      title: `${p.nom} — ${p.porteur}\n${p.nb_mesures} mesure(s) simulée(s), ${p.nb_non_representees || 0} non représentable(s)`,
+      disabled: p.nb_mesures === 0 })),
+    ...SCENARIOS.map((n) => ({ value: n, group: "Mes scénarios", label: n, title: `Scénario enregistré « ${n} »` })),
+  ];
+}
+function renderChips() {
+  const colors = SERIES();
+  const groups = new Map();
+  for (const it of chipItems()) {
+    if (!groups.has(it.group)) groups.set(it.group, []);
+    const idx = compareSel.indexOf(it.value);
+    const full = idx < 0 && compareSel.length >= MAX_COMPARE;
+    const btn = el("button", {
+      class: `chip${idx >= 0 ? " on" : ""}`, "aria-pressed": idx >= 0 ? "true" : "false",
+      title: it.disabled ? `${it.title}\n(rien à simuler dans ce modèle)` : full ? `${it.title}\n(4 comparaisons au plus)` : it.title,
+      disabled: it.disabled || full ? "" : null,
+      onclick: () => {
+        if (idx >= 0) compareSel.splice(idx, 1); else compareSel.push(it.value);
+        renderChips();
+        if (hasRun) runSim();
+      },
+    }, el("span", { class: "swatch", style: idx >= 0 ? `background:${colors[idx + 1]}` : "" }), it.label);
+    groups.get(it.group).push(btn);
+  }
+  $("#sc-compare").replaceChildren(...[...groups].map(([g, btns]) =>
+    el("div", { class: "chip-group" }, el("span", { class: "chip-group-label" }, g), ...btns)));
+  if (!groups.size) $("#sc-compare").replaceChildren(el("span", { class: "note" }, "Aucun programme ni scénario enregistré."));
+}
+$("#sc-clear").addEventListener("click", () => { compareSel.splice(0); renderChips(); if (hasRun) runSim(); });
+
 async function loadProgramme(id) {
   const r = await api(`/api/programmes/${encodeURIComponent(id)}?exercice=${BASE.exercice}`);
   return r;
@@ -437,7 +476,7 @@ $("#prog-list").addEventListener("change", async (e) => {
   const r = await loadProgramme(e.target.value);
   const p = r.programme;
   measures.splice(0, measures.length, ...r.mesures.map((m) => ({ ...m, target: m.target || "" })));
-  $("#sc-name").value = p.nom;
+  $("#sc-name").value = progLabel(p);
   const ko = r.mesures.filter((m) => m.erreur).length;
   const src = p.source_principale?.url && /^https?:\/\//.test(p.source_principale.url) ? p.source_principale.url : null;
   $("#prog-info").replaceChildren(

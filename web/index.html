@@ -95,9 +95,15 @@
           <button id="sc-del">Supprimer</button>
         </div>
         <div class="toolbar">
-          <label>Comparer avec (scénarios et programmes, Ctrl/⌘ pour plusieurs) : <select id="sc-compare" multiple size="4"></select></label>
         </div>
-        <p class="note">Tous les scénarios comparés utilisent les mêmes hypothèses macro (panneau de gauche) : les écarts ne viennent que des mesures.</p>
+        <div class="compare">
+          <div class="compare-head">
+            <strong>Comparer avec</strong>
+            <span class="note">Cliquer pour ajouter ou retirer (4 au plus). Mêmes hypothèses macro pour tous : les écarts ne viennent que des mesures.</span>
+            <button id="sc-clear" class="link">Tout retirer</button>
+          </div>
+          <div id="sc-compare"></div>
+        </div>
         <div id="sim-error" class="error" hidden></div>
         <div class="grid">
           <figure><figcaption>Déficit de l'État (M€) <span class="perimetre">État</span></figcaption><div class="chart" id="s-deficit"></div></figure>
